@@ -1,7 +1,7 @@
 """
-Roadmap Pro — World-class project visualization tool.
+Transformation Office — Block & Gantt Creator Tool.
 
-Creates beautiful Gantt charts and space-filling block diagrams
+Creates presentation-ready Gantt charts and space-filling block diagrams
 from simple Excel input. Exports to PowerPoint, PDF, and PNG.
 """
 import io
@@ -18,9 +18,15 @@ from block_renderer import render_block_diagram, render_block_pdf
 from pptx_export import export_gantt_pptx, export_block_pptx
 
 
+# ── Constants ────────────────────────────────────────────────────────────────
+APP_NAME = "Block & Gantt Creator"
+APP_FULL_NAME = "Transformation Office — Block & Gantt Creator Tool"
+APP_VERSION = "0.9 Beta"
+
+
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Roadmap Pro",
+    page_title=APP_FULL_NAME,
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -29,30 +35,83 @@ st.set_page_config(
 # ── Custom CSS ───────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    .stApp { background-color: #F8FAFC; }
+    /* ── Global ─────────────────────────────────────────────────── */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
+    .stApp {
+        background-color: #F8FAFC;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────── */
     .main-header {
-        background: linear-gradient(135deg, #0F172A 0%, #1E293B 50%, #334155 100%);
+        background: linear-gradient(135deg, #0F172A 0%, #1E293B 40%, #1E3A5F 100%);
         color: white;
-        padding: 2rem 2.5rem;
+        padding: 2.25rem 2.5rem 2rem;
         border-radius: 16px;
-        margin-bottom: 1.5rem;
-        box-shadow: 0 4px 20px rgba(15, 23, 42, 0.15);
+        margin-bottom: 0.5rem;
+        box-shadow: 0 4px 24px rgba(15, 23, 42, 0.18);
+        position: relative;
+        overflow: hidden;
+    }
+    .main-header::before {
+        content: '';
+        position: absolute; top: 0; right: 0;
+        width: 300px; height: 100%;
+        background: radial-gradient(circle at 80% 50%, rgba(59,130,246,0.12) 0%, transparent 70%);
+        pointer-events: none;
+    }
+    .main-header .header-label {
+        font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+        letter-spacing: 0.12em; color: #60A5FA; margin-bottom: 0.35rem;
     }
     .main-header h1 {
-        font-size: 2rem; font-weight: 700; margin: 0; letter-spacing: -0.02em;
+        font-size: 1.85rem; font-weight: 800; margin: 0; letter-spacing: -0.025em;
+        line-height: 1.2;
     }
-    .main-header p {
-        color: #94A3B8; margin: 0.3rem 0 0 0; font-size: 1rem;
+    .main-header .subtitle {
+        color: #94A3B8; margin: 0.35rem 0 0 0; font-size: 0.95rem;
+        font-weight: 400;
+    }
+    .main-header .version-badge {
+        position: absolute; top: 1.25rem; right: 1.5rem;
+        background: rgba(251, 191, 36, 0.15); color: #FBBF24;
+        font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.08em; padding: 0.25rem 0.65rem;
+        border-radius: 20px; border: 1px solid rgba(251, 191, 36, 0.3);
     }
 
+    /* ── Beta banner ────────────────────────────────────────────── */
+    .beta-banner {
+        background: linear-gradient(90deg, #FFFBEB 0%, #FEF3C7 100%);
+        border: 1px solid #F59E0B;
+        border-left: 4px solid #F59E0B;
+        border-radius: 8px;
+        padding: 0.75rem 1.25rem;
+        margin-bottom: 1.25rem;
+        display: flex; align-items: center; gap: 0.75rem;
+    }
+    .beta-banner .beta-icon {
+        font-size: 1.1rem; flex-shrink: 0;
+    }
+    .beta-banner .beta-text {
+        font-size: 0.82rem; color: #92400E; line-height: 1.45;
+    }
+    .beta-banner .beta-text strong { color: #78350F; }
+
+    /* ── Cards ───────────────────────────────────────────────────── */
     .card {
         background: white; border-radius: 12px; padding: 1.5rem;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.06); border: 1px solid #E2E8F0;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.05); border: 1px solid #E2E8F0;
         margin-bottom: 1rem; height: 100%;
+        transition: box-shadow 0.2s ease, transform 0.2s ease;
     }
-    .card h3 { margin-top: 0; color: #0F172A; }
-    .card p { color: #64748B; font-size: 0.95rem; line-height: 1.5; }
+    .card:hover {
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        transform: translateY(-1px);
+    }
+    .card h3 { margin-top: 0; color: #0F172A; font-weight: 700; font-size: 1.05rem; }
+    .card p { color: #64748B; font-size: 0.9rem; line-height: 1.55; }
 
     .feature-icon {
         width: 48px; height: 48px; border-radius: 12px;
@@ -60,31 +119,58 @@ st.markdown("""
         font-size: 1.5rem; margin-bottom: 0.75rem;
     }
 
+    /* ── Tabs ────────────────────────────────────────────────────── */
     .stTabs [data-baseweb="tab-list"] { gap: 8px; }
     .stTabs [data-baseweb="tab"] {
         border-radius: 8px; padding: 8px 20px; font-weight: 600;
     }
 
+    /* ── Buttons ─────────────────────────────────────────────────── */
     .stDownloadButton > button {
         border-radius: 8px; font-weight: 600; padding: 0.5rem 1.5rem;
     }
 
+    /* ── Sidebar ─────────────────────────────────────────────────── */
     section[data-testid="stSidebar"] {
         background-color: #FFFFFF; border-right: 1px solid #E2E8F0;
     }
     section[data-testid="stSidebar"] .stMarkdown h3 {
-        color: #0F172A; font-size: 0.85rem; font-weight: 700;
-        text-transform: uppercase; letter-spacing: 0.05em;
+        color: #0F172A; font-size: 0.8rem; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.06em;
     }
 
+    .sidebar-brand {
+        padding: 0.5rem 0 1rem 0; margin-bottom: 0.5rem;
+        border-bottom: 1px solid #F1F5F9; text-align: center;
+    }
+    .sidebar-brand .brand-name {
+        font-size: 0.75rem; font-weight: 700; color: #0F172A;
+        text-transform: uppercase; letter-spacing: 0.08em;
+    }
+    .sidebar-brand .brand-sub {
+        font-size: 0.65rem; color: #94A3B8; margin-top: 0.15rem;
+    }
+
+    /* ── Metrics ─────────────────────────────────────────────────── */
     [data-testid="stMetric"] {
         background: white; border-radius: 10px; padding: 1rem;
-        border: 1px solid #E2E8F0; box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+        border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 0.75rem !important; font-weight: 600 !important;
+        text-transform: uppercase; letter-spacing: 0.04em;
+        color: #64748B !important;
+    }
+    [data-testid="stMetricValue"] {
+        font-weight: 800 !important; color: #0F172A !important;
     }
 
+    /* ── Hide Streamlit chrome ───────────────────────────────────── */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
+    header[data-testid="stHeader"] {background: transparent;}
 
+    /* ── Steps ───────────────────────────────────────────────────── */
     .step-num {
         display: inline-flex; align-items: center; justify-content: center;
         background: #2563EB; color: white; border-radius: 50%;
@@ -92,31 +178,64 @@ st.markdown("""
         margin-right: 12px; flex-shrink: 0;
     }
     .step-row {
-        display: flex; align-items: center; padding: 0.6rem 0;
-        border-bottom: 1px solid #F1F5F9;
+        display: flex; align-items: center; padding: 0.65rem 0;
+        border-bottom: 1px solid #F1F5F9; font-size: 0.92rem;
+        color: #334155; line-height: 1.5;
     }
     .step-row:last-child { border-bottom: none; }
+    .step-row strong { color: #0F172A; }
 
+    /* ── Help boxes ──────────────────────────────────────────────── */
     .help-box {
         background: #FFF7ED; border: 1px solid #FED7AA; border-radius: 10px;
         padding: 1.25rem; margin-top: 1rem;
     }
-    .help-box h4 { margin: 0 0 0.5rem 0; color: #9A3412; }
-    .help-box p, .help-box li { color: #78350F; font-size: 0.9rem; }
+    .help-box h4 { margin: 0 0 0.5rem 0; color: #9A3412; font-size: 0.95rem; }
+    .help-box p, .help-box li { color: #78350F; font-size: 0.85rem; line-height: 1.55; }
 
+    /* ── Column reference table ──────────────────────────────────── */
     .column-table {
         width: 100%; border-collapse: collapse; margin: 0.75rem 0;
     }
     .column-table th {
         background: #F1F5F9; padding: 0.5rem 0.75rem; text-align: left;
-        font-size: 0.85rem; color: #475569; border-bottom: 2px solid #E2E8F0;
+        font-size: 0.8rem; color: #475569; border-bottom: 2px solid #E2E8F0;
+        font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
     }
     .column-table td {
         padding: 0.5rem 0.75rem; border-bottom: 1px solid #F1F5F9;
         font-size: 0.85rem; color: #334155;
     }
+    .column-table tr:hover { background: #F8FAFC; }
     .required { color: #DC2626; font-weight: 600; }
     .optional { color: #059669; }
+
+    /* ── Section headers ─────────────────────────────────────────── */
+    .section-header {
+        font-size: 1.15rem; font-weight: 700; color: #0F172A;
+        margin: 1.5rem 0 0.75rem 0; padding-bottom: 0.4rem;
+        border-bottom: 2px solid #E2E8F0;
+    }
+
+    /* ── Footer ──────────────────────────────────────────────────── */
+    .app-footer {
+        text-align: center; padding: 1.5rem 0 0.5rem;
+        border-top: 1px solid #E2E8F0; margin-top: 2rem;
+    }
+    .app-footer p {
+        font-size: 0.75rem; color: #94A3B8; margin: 0.15rem 0;
+    }
+    .app-footer .footer-label {
+        font-weight: 600; color: #64748B; text-transform: uppercase;
+        letter-spacing: 0.06em; font-size: 0.65rem;
+    }
+
+    /* ── Export section ───────────────────────────────────────────── */
+    .export-header {
+        font-size: 0.85rem; font-weight: 700; color: #475569;
+        text-transform: uppercase; letter-spacing: 0.05em;
+        margin-bottom: 0.5rem; padding-top: 0.5rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -133,28 +252,50 @@ if "load_error" not in st.session_state:
 
 
 # ── Header ───────────────────────────────────────────────────────────────────
-st.markdown("""
+st.markdown(f"""
 <div class="main-header">
-    <h1>📊 Roadmap Pro</h1>
-    <p>Create stunning project visualizations from simple spreadsheets</p>
+    <div class="version-badge">{APP_VERSION}</div>
+    <div class="header-label">Transformation Office</div>
+    <h1>Block & Gantt Creator Tool</h1>
+    <p class="subtitle">Generate presentation-ready project visualizations from a simple spreadsheet</p>
+</div>
+""", unsafe_allow_html=True)
+
+# ── Beta notice ──────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="beta-banner">
+    <span class="beta-icon">&#9432;</span>
+    <div class="beta-text">
+        <strong>Early Access Preview</strong> &mdash; This tool is currently in active development.
+        We are gathering user feedback and refining functionality. You may encounter occasional
+        formatting inconsistencies or limitations. Your input is invaluable &mdash; please share
+        any feedback or issues with the Transformation Office team.
+    </div>
 </div>
 """, unsafe_allow_html=True)
 
 
 # ── Sidebar ──────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### 📥 Step 1 — Get Template")
+    st.markdown("""
+    <div class="sidebar-brand">
+        <div class="brand-name">Transformation Office</div>
+        <div class="brand-sub">Block & Gantt Creator Tool</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("### Step 1 — Get Template")
     template_bytes = create_template_bytes()
     st.download_button(
         label="Download Excel Template",
         data=template_bytes,
-        file_name="roadmap_template.xlsx",
+        file_name="transformation_office_template.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
-        help="Pre-filled template with sample data and instructions",
+        help="Pre-filled template with sample data and formatting instructions",
     )
 
-    st.markdown("### 📤 Step 2 — Upload Your File")
+    st.markdown("### Step 2 — Upload Your File")
     uploaded_file = st.file_uploader(
         "Drop your Excel file here",
         type=["xlsx", "xls"],
@@ -176,24 +317,24 @@ with st.sidebar:
                 st.success(f"Loaded **{len(loaded_items)}** work items across **{len(set(it.category for it in loaded_items))}** categories")
 
                 if loaded_warnings:
-                    with st.expander(f"⚠️ {len(loaded_warnings)} warning(s)", expanded=False):
+                    with st.expander(f"Warnings ({len(loaded_warnings)})", expanded=False):
                         for w in loaded_warnings:
                             st.caption(w)
         except Exception as e:
             st.session_state["load_error"] = str(e)
             st.session_state["items"] = None
-            st.error(f"Could not read file — see troubleshooting below")
+            st.error("Could not read file — see troubleshooting on the home page")
 
     # Show load error details in sidebar
     if st.session_state["load_error"]:
-        with st.expander("🔍 Error Details", expanded=True):
+        with st.expander("Error Details", expanded=True):
             st.code(st.session_state["load_error"], language=None)
 
     st.divider()
 
     # Settings — only when data is loaded
     if st.session_state["items"] is not None:
-        st.markdown("### 🎨 Chart Settings")
+        st.markdown("### Chart Settings")
 
         config = st.session_state["config"]
         config.title = st.text_input("Title", value=config.title)
@@ -222,7 +363,7 @@ with st.sidebar:
         config.show_legend = st.toggle("Show legend", value=config.show_legend)
 
         st.divider()
-        st.markdown("### 📅 Date Range")
+        st.markdown("### Date Range")
         d_col1, d_col2 = st.columns(2)
         with d_col1:
             if config.start_date:
@@ -233,13 +374,23 @@ with st.sidebar:
 
         st.session_state["config"] = config
 
+    # Sidebar footer
+    st.divider()
+    st.markdown(f"""
+    <div style="text-align: center; padding: 0.25rem 0;">
+        <div style="font-size: 0.6rem; color: #94A3B8; text-transform: uppercase;
+             letter-spacing: 0.08em; font-weight: 600;">Version</div>
+        <div style="font-size: 0.7rem; color: #64748B; font-weight: 500;">{APP_VERSION}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN CONTENT AREA
 # ══════════════════════════════════════════════════════════════════════════════
 
 def show_homepage():
-    """Beautiful landing page with clear instructions and troubleshooting."""
+    """Landing page with clear instructions and troubleshooting."""
 
     # Feature cards
     col1, col2, col3 = st.columns(3)
@@ -247,64 +398,77 @@ def show_homepage():
     with col1:
         st.markdown("""
         <div class="card">
-            <div class="feature-icon" style="background: #EFF6FF;">📋</div>
+            <div class="feature-icon" style="background: #EFF6FF;">
+                <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#2563EB" stroke-width="2">
+                    <path d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7"/>
+                </svg>
+            </div>
             <h3>Simple Input</h3>
             <p>Just <strong>3 columns</strong> needed: Title, Start Date, and End Date.
-            Add Category to group by team. The app figures out the rest.</p>
+            Add Category to group by workstream. The tool handles the rest.</p>
         </div>
         """, unsafe_allow_html=True)
 
     with col2:
         st.markdown("""
         <div class="card">
-            <div class="feature-icon" style="background: #F0FDF4;">🎨</div>
-            <h3>Two Powerful Views</h3>
-            <p><strong>Gantt Chart</strong> — swim lanes showing each team's work over time.<br>
-            <strong>Block Diagram</strong> — everything packed into one slide showing parallel workload.</p>
+            <div class="feature-icon" style="background: #F0FDF4;">
+                <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#059669" stroke-width="2">
+                    <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+                    <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+                </svg>
+            </div>
+            <h3>Two Visualization Modes</h3>
+            <p><strong>Gantt Chart</strong> — swim lanes showing each workstream over time.<br>
+            <strong>Block Diagram</strong> — all items packed into one slide showing parallel workload.</p>
         </div>
         """, unsafe_allow_html=True)
 
     with col3:
         st.markdown("""
         <div class="card">
-            <div class="feature-icon" style="background: #FEF3C7;">📤</div>
-            <h3>Export Anywhere</h3>
-            <p>Download as <strong>PowerPoint</strong> (editable shapes), <strong>PDF</strong> (vector),
-            or <strong>PNG</strong> (high-res image). Ready for presentations.</p>
+            <div class="feature-icon" style="background: #FEF3C7;">
+                <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#D97706" stroke-width="2">
+                    <path d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+            </div>
+            <h3>Presentation-Ready Export</h3>
+            <p>Download as <strong>PowerPoint</strong> (fully editable shapes), <strong>PDF</strong> (vector quality),
+            or <strong>PNG</strong> (high-res image). Ready for leadership decks.</p>
         </div>
         """, unsafe_allow_html=True)
 
     st.markdown("")
 
     # ── Step-by-step guide ────────────────────────────────────────────────
-    st.markdown("### How It Works")
+    st.markdown('<div class="section-header">How It Works</div>', unsafe_allow_html=True)
     st.markdown("""
     <div class="card">
         <div class="step-row">
             <span class="step-num">1</span>
             <div>
                 <strong>Download the template</strong> — Click "Download Excel Template" in the sidebar.
-                It comes pre-filled with sample data so you can see the format.
+                It comes pre-filled with sample data so you can see the expected format.
             </div>
         </div>
         <div class="step-row">
             <span class="step-num">2</span>
             <div>
                 <strong>Add your data</strong> — Open the template in Excel or Google Sheets.
-                Replace the sample rows with your own projects. Only Title, Start Date, and End Date are required.
+                Replace the sample rows with your own initiatives. Only Title, Start Date, and End Date are required.
             </div>
         </div>
         <div class="step-row">
             <span class="step-num">3</span>
             <div>
                 <strong>Upload your file</strong> — Drag your .xlsx file into the uploader in the sidebar,
-                or click to browse. The app instantly reads and validates your data.
+                or click "Browse files." The tool instantly reads and validates your data.
             </div>
         </div>
         <div class="step-row">
             <span class="step-num">4</span>
             <div>
-                <strong>Customize & export</strong> — Choose your color palette, toggle options,
+                <strong>Customize & export</strong> — Select your color palette, adjust the date range,
                 then download your chart as PowerPoint, PDF, or PNG.
             </div>
         </div>
@@ -314,12 +478,12 @@ def show_homepage():
     st.markdown("")
 
     # ── Excel format reference ────────────────────────────────────────────
-    st.markdown("### Excel Format Reference")
+    st.markdown('<div class="section-header">Excel Format Reference</div>', unsafe_allow_html=True)
     st.markdown("""
     <div class="card">
-        <p style="margin-bottom: 0.75rem; color: #475569;">
-            Your Excel file needs one sheet with the following columns. The app is flexible with
-            column names — for example, "Name" works instead of "Title", or "Team" instead of "Category".
+        <p style="margin-bottom: 0.75rem; color: #475569; font-size: 0.88rem;">
+            Your Excel file needs one sheet with the following columns. Column names are flexible &mdash;
+            for example, "Name" works in place of "Title", or "Team" in place of "Category".
         </p>
         <table class="column-table">
             <thead>
@@ -334,31 +498,31 @@ def show_homepage():
                 <tr>
                     <td><strong>Title</strong></td>
                     <td><span class="required">Required</span></td>
-                    <td>Name of the work item</td>
+                    <td>Name of the initiative or work item</td>
                     <td>Website Redesign</td>
                 </tr>
                 <tr>
                     <td><strong>Start Date</strong></td>
                     <td><span class="required">Required</span></td>
-                    <td>When work begins (any date format works)</td>
+                    <td>When work begins (any standard date format)</td>
                     <td>2025-01-15</td>
                 </tr>
                 <tr>
                     <td><strong>End Date</strong></td>
                     <td><span class="required">Required</span></td>
-                    <td>When work ends</td>
+                    <td>When work is expected to complete</td>
                     <td>2025-03-31</td>
                 </tr>
                 <tr>
                     <td><strong>Category</strong></td>
                     <td><span class="optional">Optional</span></td>
-                    <td>Team or workstream (used for colors &amp; grouping)</td>
+                    <td>Workstream, team, or department (used for color coding &amp; swim lanes)</td>
                     <td>Marketing</td>
                 </tr>
                 <tr>
                     <td><strong>Description</strong></td>
                     <td><span class="optional">Optional</span></td>
-                    <td>Brief description shown inside blocks</td>
+                    <td>Brief description displayed inside blocks</td>
                     <td>Complete site overhaul</td>
                 </tr>
                 <tr>
@@ -370,13 +534,13 @@ def show_homepage():
                 <tr>
                     <td><strong>Owner</strong></td>
                     <td><span class="optional">Optional</span></td>
-                    <td>Person responsible</td>
+                    <td>Responsible individual or lead</td>
                     <td>Sarah</td>
                 </tr>
                 <tr>
                     <td><strong>Label</strong></td>
                     <td><span class="optional">Optional</span></td>
-                    <td>Short label shown on the block (e.g., "D1", "MVP")</td>
+                    <td>Short identifier shown on the block (e.g., "D1", "MVP")</td>
                     <td>M2</td>
                 </tr>
             </tbody>
@@ -387,9 +551,9 @@ def show_homepage():
     st.markdown("")
 
     # ── Try sample data ──────────────────────────────────────────────────
-    st.markdown("### Quick Start")
-    st.markdown("Don't have a file ready? Try the app with built-in sample data:")
-    if st.button("🚀 Load Sample Data", type="primary", use_container_width=False):
+    st.markdown('<div class="section-header">Quick Start</div>', unsafe_allow_html=True)
+    st.markdown("Don't have a file ready? Load the built-in sample data to explore the tool:")
+    if st.button("Load Sample Data", type="primary", use_container_width=False):
         try:
             sample_bytes = create_template_bytes()
             loaded_items, loaded_config, loaded_warnings = read_excel(io.BytesIO(sample_bytes))
@@ -407,51 +571,60 @@ def show_homepage():
     st.markdown("")
 
     # ── Troubleshooting ──────────────────────────────────────────────────
-    st.markdown("### Troubleshooting")
+    st.markdown('<div class="section-header">Troubleshooting</div>', unsafe_allow_html=True)
     st.markdown("""
     <div class="help-box">
-        <h4>📁 File won't upload?</h4>
+        <h4>File won't upload?</h4>
         <ul>
-            <li>Make sure your file is <strong>.xlsx</strong> format (not .csv, .xls, or .numbers)</li>
+            <li>Ensure your file is in <strong>.xlsx</strong> format (not .csv, .xls, or .numbers)</li>
             <li>The file must be under 200 MB</li>
-            <li>If using Google Sheets, download as .xlsx first (File → Download → Microsoft Excel)</li>
+            <li>If using Google Sheets, export as .xlsx first: <em>File &rarr; Download &rarr; Microsoft Excel</em></li>
         </ul>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown("""
     <div class="help-box">
-        <h4>⚠️ "Missing required column" error?</h4>
+        <h4>"Missing required column" error?</h4>
         <ul>
             <li>Your file needs at least these columns: <strong>Title</strong>, <strong>Start Date</strong>, <strong>End Date</strong></li>
-            <li>Column names are flexible — "Name", "Task", or "Item" all work for the Title column</li>
-            <li>Make sure the column headers are in <strong>Row 1</strong> of your spreadsheet</li>
-            <li>Check there are no merged cells in the header row</li>
+            <li>Column names are flexible &mdash; "Name", "Task", or "Item" all map to the Title column</li>
+            <li>Ensure column headers are in <strong>Row 1</strong> of your spreadsheet</li>
+            <li>Verify there are no merged cells in the header row</li>
         </ul>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown("""
     <div class="help-box">
-        <h4>📅 Date parsing errors?</h4>
+        <h4>Date parsing errors?</h4>
         <ul>
             <li>Supported formats: <code>2025-01-15</code>, <code>01/15/2025</code>, <code>1/15/25</code></li>
-            <li>Make sure date cells in Excel are formatted as <strong>Date</strong>, not Text</li>
-            <li>Avoid leaving date cells blank — remove entire rows you don't need</li>
-            <li>If Start Date is after End Date, the app will swap them automatically</li>
+            <li>Ensure date cells are formatted as <strong>Date</strong> in Excel, not as plain text</li>
+            <li>Remove blank rows rather than leaving empty cells between data</li>
+            <li>If Start Date is after End Date, the tool will swap them automatically and flag a warning</li>
         </ul>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown("""
     <div class="help-box">
-        <h4>🎨 Chart looks wrong?</h4>
+        <h4>Chart looks wrong?</h4>
         <ul>
-            <li>Use the <strong>Date Range</strong> controls in the sidebar to adjust the visible timeframe</li>
-            <li>Try a different <strong>Color Palette</strong> if colors are hard to distinguish</li>
-            <li>For the Block Diagram, try <strong>4:3 aspect ratio</strong> if blocks feel too short</li>
-            <li>Make sure your Category names are consistent (e.g., "Marketing" vs "marketing" are treated as different)</li>
+            <li>Adjust the <strong>Date Range</strong> in the sidebar to focus on the relevant time period</li>
+            <li>Try a different <strong>Color Palette</strong> if categories are difficult to distinguish</li>
+            <li>For the Block Diagram, experiment with the <strong>4:3 aspect ratio</strong> if blocks appear too narrow</li>
+            <li>Ensure Category names are consistent (e.g., "Marketing" and "marketing" will be treated as separate groups)</li>
         </ul>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Footer ────────────────────────────────────────────────────────────
+    st.markdown(f"""
+    <div class="app-footer">
+        <p class="footer-label">Transformation Office</p>
+        <p>Block & Gantt Creator Tool &middot; {APP_VERSION}</p>
+        <p>For internal use. Please direct feedback to the Transformation Office team.</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -476,7 +649,7 @@ def show_visualizations():
     # Clear data button
     st.markdown("")
     with st.columns([6, 1])[1]:
-        if st.button("🗑️ Clear Data", help="Remove loaded data and start over"):
+        if st.button("Clear Data", help="Remove loaded data and return to the home screen"):
             st.session_state["items"] = None
             st.session_state["config"] = ChartConfig()
             st.session_state["warnings"] = []
@@ -485,9 +658,9 @@ def show_visualizations():
 
     # Tabs
     tab_gantt, tab_block, tab_data = st.tabs([
-        "📊 Gantt Chart",
-        "🧱 Block Diagram",
-        "📋 Data Preview",
+        "Gantt Chart",
+        "Block Diagram",
+        "Data Preview",
     ])
 
     # ── GANTT CHART TAB ──────────────────────────────────────────────────
@@ -501,28 +674,28 @@ def show_visualizations():
             st.image(gantt_preview, use_container_width=True)
 
             st.markdown("---")
-            st.markdown("**Export Gantt Chart**")
+            st.markdown('<div class="export-header">Export Gantt Chart</div>', unsafe_allow_html=True)
             g1, g2, g3 = st.columns(3)
 
             with g1:
                 hires_gantt = render_gantt(items, config, dpi=300)
                 st.download_button(
-                    "📷 Download PNG (300 DPI)", data=hires_gantt,
-                    file_name="roadmap_gantt.png", mime="image/png",
+                    "Download PNG (300 DPI)", data=hires_gantt,
+                    file_name="gantt_chart.png", mime="image/png",
                     use_container_width=True,
                 )
             with g2:
                 gantt_pdf = render_gantt_pdf(items, config, dpi=300)
                 st.download_button(
-                    "📄 Download PDF", data=gantt_pdf,
-                    file_name="roadmap_gantt.pdf", mime="application/pdf",
+                    "Download PDF", data=gantt_pdf,
+                    file_name="gantt_chart.pdf", mime="application/pdf",
                     use_container_width=True,
                 )
             with g3:
                 gantt_pptx = export_gantt_pptx(items, config)
                 st.download_button(
-                    "📊 Download PowerPoint", data=gantt_pptx,
-                    file_name="roadmap_gantt.pptx",
+                    "Download PowerPoint", data=gantt_pptx,
+                    file_name="gantt_chart.pptx",
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                     use_container_width=True,
                 )
@@ -535,13 +708,13 @@ def show_visualizations():
     # ── BLOCK DIAGRAM TAB ────────────────────────────────────────────────
     with tab_block:
         st.markdown("#### Space-Filling Block Diagram")
-        st.caption("All work items packed into a single slide showing parallel workload. Great for executive presentations.")
+        st.caption("All work items packed into a single slide showing parallel workload. Ideal for executive presentations.")
 
         aspect_ratio = st.selectbox(
             "Slide Aspect Ratio",
             options=["16:9", "4:3"],
             index=0,
-            help="16:9 for widescreen monitors and modern presentations. 4:3 for older projectors.",
+            help="16:9 for widescreen displays and modern presentations. 4:3 for older projectors.",
         )
 
         try:
@@ -550,28 +723,28 @@ def show_visualizations():
             st.image(block_preview, use_container_width=True)
 
             st.markdown("---")
-            st.markdown("**Export Block Diagram**")
+            st.markdown('<div class="export-header">Export Block Diagram</div>', unsafe_allow_html=True)
             b1, b2, b3 = st.columns(3)
 
             with b1:
                 hires_block = render_block_diagram(items, config, dpi=300, slide_aspect=aspect_ratio)
                 st.download_button(
-                    "📷 Download PNG (300 DPI)", data=hires_block,
-                    file_name="roadmap_block.png", mime="image/png",
+                    "Download PNG (300 DPI)", data=hires_block,
+                    file_name="block_diagram.png", mime="image/png",
                     use_container_width=True,
                 )
             with b2:
                 block_pdf_data = render_block_pdf(items, config, dpi=300, slide_aspect=aspect_ratio)
                 st.download_button(
-                    "📄 Download PDF", data=block_pdf_data,
-                    file_name="roadmap_block.pdf", mime="application/pdf",
+                    "Download PDF", data=block_pdf_data,
+                    file_name="block_diagram.pdf", mime="application/pdf",
                     use_container_width=True,
                 )
             with b3:
                 block_pptx = export_block_pptx(items, config)
                 st.download_button(
-                    "📊 Download PowerPoint", data=block_pptx,
-                    file_name="roadmap_block.pptx",
+                    "Download PowerPoint", data=block_pptx,
+                    file_name="block_diagram.pptx",
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                     use_container_width=True,
                 )
@@ -583,7 +756,7 @@ def show_visualizations():
 
     # ── DATA PREVIEW TAB ─────────────────────────────────────────────────
     with tab_data:
-        st.markdown("#### Your Data")
+        st.markdown("#### Loaded Data")
 
         df = pd.DataFrame([
             {
@@ -626,6 +799,14 @@ def show_visualizations():
             st.markdown("#### Warnings")
             for w in st.session_state["warnings"]:
                 st.warning(w)
+
+    # ── Page footer ──────────────────────────────────────────────────────
+    st.markdown(f"""
+    <div class="app-footer">
+        <p class="footer-label">Transformation Office</p>
+        <p>Block & Gantt Creator Tool &middot; {APP_VERSION}</p>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # ── Route to homepage or visualization ───────────────────────────────────────

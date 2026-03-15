@@ -1,4 +1,4 @@
-"""Data models for the Roadmap Pro app."""
+"""Data models for the Transformation Office Block & Gantt Creator Tool."""
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Optional

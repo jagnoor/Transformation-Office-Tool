@@ -237,7 +237,7 @@ def create_template_bytes() -> bytes:
     ws_info.sheet_properties.tabColor = "10B981"
 
     instructions = [
-        ("Roadmap Pro — Input Guide", ""),
+        ("Block & Gantt Creator — Input Guide", ""),
         ("", ""),
         ("Required Columns:", ""),
         ("Title", "Name of the work item (e.g., 'API Gateway Development')"),

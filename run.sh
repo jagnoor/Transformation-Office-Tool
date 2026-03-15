@@ -1,27 +1,28 @@
 #!/bin/bash
-# Roadmap Pro — Quick Start
-# This script installs dependencies and launches the app.
+# Transformation Office — Block & Gantt Creator Tool
+# This script installs dependencies and launches the application.
 
 echo ""
-echo "  ╔══════════════════════════════════════╗"
-echo "  ║         Roadmap Pro v1.0             ║"
-echo "  ║  Beautiful project visualizations    ║"
-echo "  ╚══════════════════════════════════════╝"
+echo "  ╔═══════════════════════════════════════════════╗"
+echo "  ║   Transformation Office                       ║"
+echo "  ║   Block & Gantt Creator Tool  ·  v0.9 Beta    ║"
+echo "  ╚═══════════════════════════════════════════════╝"
 echo ""
 
 # Check Python
 if ! command -v python3 &> /dev/null; then
-    echo "Python 3 is required. Please install it from python.org"
+    echo "  [ERROR] Python 3 is required."
+    echo "  Please install it from https://www.python.org/downloads/"
     exit 1
 fi
 
 # Install dependencies
-echo "Installing dependencies..."
+echo "  Installing dependencies..."
 pip3 install -q -r requirements.txt 2>/dev/null || pip install -q -r requirements.txt 2>/dev/null
 
 echo ""
-echo "Starting Roadmap Pro..."
-echo "The app will open in your browser at http://localhost:8501"
+echo "  Starting application..."
+echo "  The tool will open in your browser at http://localhost:8501"
 echo ""
 
 streamlit run app.py --server.headless true
