@@ -1,894 +1,459 @@
-from __future__ import annotations
+"""PowerPoint export — creates editable PPTX files.
 
-"""Editable PPTX export.
-
-This module renders the roadmap as editable PowerPoint shapes:
-  - Workstreams as swimlanes
-  - Tasks as rounded rectangles
-  - Milestones as diamonds
-  - Timeline header band (auto weeks/months/quarters/years)
-
-The intent is an executive-ready slide that remains easy to tweak in
-PowerPoint (move/resize blocks, edit text, etc.).
+Generates native PowerPoint shapes (not images) so users can edit
+colors, text, and positions after export.
 """
-
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta
-from io import BytesIO
-from typing import Dict, List, Optional, Tuple
+import io
+from datetime import date, timedelta
+from typing import List
 
 from pptx import Presentation
+from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
-from pptx.enum.dml import MSO_LINE_DASH_STYLE
-from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE
-from pptx.enum.text import MSO_AUTO_SIZE, MSO_VERTICAL_ANCHOR, PP_ALIGN
-from pptx.util import Inches, Pt
-from zoneinfo import ZoneInfo
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.enum.shapes import MSO_SHAPE
 
-from date_utils import block_span_inclusive, date_to_x
-from renderer import (
-    DEFAULT_PALETTE,
-    choose_timeline_mode,
-    compute_bands_and_rows,
-    resolve_font_family,
-)
-from roadmap_models import Settings, Task, Workstream
-from scheduler import schedule_by_workstream
-
-
-# ----------------------------
-# Color helpers
-# ----------------------------
+from models import WorkItem, ChartConfig, STATUS_COLORS
 
 
 def _hex_to_rgb(hex_color: str) -> RGBColor:
-    s = (hex_color or "").strip()
-    if not s:
-        return RGBColor(0, 0, 0)
-    if s.startswith("#"):
-        s = s[1:]
-    s = s.upper()
-    r = int(s[0:2], 16)
-    g = int(s[2:4], 16)
-    b = int(s[4:6], 16)
-    return RGBColor(r, g, b)
+    hex_color = hex_color.lstrip("#")
+    return RGBColor(int(hex_color[:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16))
 
 
-def _lighten_hex(hex_color: str, amount: float) -> str:
-    """Lighten a #RRGGBB color by mixing with white.
-
-    amount: 0 -> unchanged, 1 -> white
-    """
-    s = (hex_color or "").strip()
-    if not s:
-        return "#FFFFFF"
-    if s.startswith("#"):
-        s = s[1:]
-    r = int(s[0:2], 16)
-    g = int(s[2:4], 16)
-    b = int(s[4:6], 16)
-    r2 = int(round(r + (255 - r) * amount))
-    g2 = int(round(g + (255 - g) * amount))
-    b2 = int(round(b + (255 - b) * amount))
-    return f"#{r2:02X}{g2:02X}{b2:02X}"
+def _darken_color(hex_color: str, factor: float = 0.2) -> str:
+    hex_color = hex_color.lstrip("#")
+    r, g, b = int(hex_color[:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+    r = int(r * (1 - factor))
+    g = int(g * (1 - factor))
+    b = int(b * (1 - factor))
+    return f"#{r:02x}{g:02x}{b:02x}"
 
 
-def _pick_workstream_colors(workstreams: List[Workstream]) -> Dict[str, str]:
-    out: Dict[str, str] = {}
-    i = 0
-    for ws in workstreams:
-        if ws.color:
-            out[ws.workstream] = ws.color
-        else:
-            out[ws.workstream] = DEFAULT_PALETTE[i % len(DEFAULT_PALETTE)]
-            i += 1
-    return out
+def _text_color_for_bg(hex_color: str) -> str:
+    hex_color = hex_color.lstrip("#")
+    r, g, b = int(hex_color[:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+    luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+    return "#FFFFFF" if luminance < 0.55 else "#1E293B"
 
 
-# ----------------------------
-# Timeline helpers
-# (importing renderer internals keeps PPTX output consistent with PDF/PNG)
-# ----------------------------
+def _lighten_color(hex_color: str, factor: float = 0.85) -> str:
+    hex_color = hex_color.lstrip("#")
+    r, g, b = int(hex_color[:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+    r = int(r + (255 - r) * factor)
+    g = int(g + (255 - g) * factor)
+    b = int(b + (255 - b) * factor)
+    return f"#{r:02x}{g:02x}{b:02x}"
 
 
-from renderer import (  # noqa: E402  (intentional internal import)
-    _build_month_segments,
-    _build_quarter_segments,
-    _build_week_segments,
-    _build_year_segments,
-    _iter_month_starts,
-    _iter_quarter_starts,
-    _iter_week_starts,
-    _iter_year_starts,
-)
+# ── Gantt PPTX ───────────────────────────────────────────────────────────────
+
+def _assign_sublanes(items: List[WorkItem]):
+    sorted_items = sorted(items, key=lambda it: (it.start_date, it.end_date, it.title))
+    sublanes = []
+    result = []
+    for item in sorted_items:
+        placed = False
+        for lane_idx, lane_items in enumerate(sublanes):
+            last_end = lane_items[-1].end_date
+            if item.start_date > last_end:
+                lane_items.append(item)
+                result.append((item, lane_idx))
+                placed = True
+                break
+        if not placed:
+            sublanes.append([item])
+            result.append((item, len(sublanes) - 1))
+    return result, len(sublanes)
 
 
-# ----------------------------
-# Text fitting (simple, deterministic)
-# ----------------------------
-
-
-def _wrap_and_truncate(text: str, width: int, max_lines: int) -> List[str]:
-    import textwrap
-
-    if max_lines <= 0:
-        return []
-    text = (text or "").strip()
-    if not text:
-        return [""]
-    lines = textwrap.wrap(text, width=width) or [""]
-    if len(lines) <= max_lines:
-        return lines
-    kept = lines[:max_lines]
-    kept[-1] = _ellipsis(kept[-1], width)
-    return kept
-
-
-def _ellipsis(line: str, width: int) -> str:
-    if width <= 1:
-        return "…"
-    line = (line or "").rstrip()
-    if len(line) <= width:
-        return line
-    if width <= 2:
-        return line[: width - 1] + "…"
-    return line[: width - 1].rstrip() + "…"
-
-
-def _is_truncated(lines: List[str], original: str) -> bool:
-    if not lines:
-        return False
-    return lines[-1].endswith("…") and not (original or "").endswith("…")
-
-
-@dataclass(frozen=True)
-class FittedText:
-    title_lines: List[str]
-    desc_lines: List[str]
-    font_size_pt: int
-
-
-def fit_text_ppt(
-    title: str,
-    desc: Optional[str],
-    *,
-    width_in: float,
-    height_in: float,
-    preview: bool = False,
-) -> FittedText:
-    """Best-effort text fitting for PPT shapes.
-
-    Uses the same heuristic as the matplotlib renderer (chars/line and max
-    lines), expressed in points (72 pts per inch).
-    """
-    base = 12 if not preview else 11
-    min_fs = 8 if not preview else 7
-
-    width_pt = max(width_in * 72.0, 36.0)
-    height_pt = max(height_in * 72.0, 18.0)
-
-    title = (title or "").strip()
-    desc = (desc or "").strip() if desc else ""
-
-    best = FittedText([title], [], min_fs)
-
-    for fs in range(base, min_fs - 1, -1):
-        max_cpl = max(int(width_pt / (fs * 0.55)), 8)
-        max_lines = max(int(height_pt / (fs * 1.25)), 1)
-
-        title_max_lines = min(2, max_lines) if desc else max_lines
-        title_lines = _wrap_and_truncate(title, max_cpl, title_max_lines)
-
-        remaining = max_lines - len(title_lines)
-        desc_lines: List[str] = []
-        if desc and remaining > 0:
-            desc_lines = _wrap_and_truncate(desc, max_cpl, remaining)
-
-        fitted = FittedText(title_lines, desc_lines, fs)
-
-        # Prefer first fontsize where title isn't truncated.
-        if not _is_truncated(title_lines, title):
-            return fitted
-        best = fitted
-
-    return best
-
-
-# ----------------------------
-# PPTX rendering
-# ----------------------------
-
-
-def export_pptx_bytes(
-    settings: Settings,
-    workstreams: List[Workstream],
-    tasks: List[Task],
-    *,
-    include_out_of_range: bool = False,
-) -> bytes:
-    """Return an editable PPTX as bytes."""
-
-    # Ensure sublanes exist (robust for callers that forget to schedule).
-    if any(t.sublane is None for t in tasks):
-        scheduled = schedule_by_workstream(tasks, touching_counts_as_overlap=True)
-        by_id = {t.id: t for ws_tasks in scheduled.values() for t in ws_tasks}
-        tasks = [by_id[t.id] for t in tasks if t.id in by_id]
-
-    # Resolve font
-    font_name = resolve_font_family(settings.font_family)
-
-    overall_start = settings.overall_start_date
-    overall_end = settings.overall_end_date
-
-    # Normalize workstream colors
-    ws_color_map = _pick_workstream_colors(workstreams)
-    workstreams_norm = [ws.model_copy(update={"color": ws_color_map[ws.workstream]}) for ws in workstreams]
-
-    # Filter/clamp tasks like the matplotlib renderer
-    visible_tasks: List[Task] = []
-    for t in tasks:
-        if t.end_date < overall_start or t.start_date > overall_end:
-            if include_out_of_range:
-                visible_tasks.append(t)
-            continue
-
-        clamped_start = max(t.start_date, overall_start)
-        clamped_end = min(t.end_date, overall_end)
-        if clamped_start != t.start_date or clamped_end != t.end_date:
-            visible_tasks.append(t.model_copy(update={"start_date": clamped_start, "end_date": clamped_end}))
-        else:
-            visible_tasks.append(t)
-
-    # Slide size: match PDF/PNG aspect (A3/A4 landscape) so exports align.
-    if settings.page_size == "A4":
-        slide_w_in, slide_h_in = 11.69, 8.27
-    else:
-        slide_w_in, slide_h_in = 16.54, 11.69
-
+def export_gantt_pptx(items: List[WorkItem], config: ChartConfig) -> bytes:
+    """Export Gantt chart as editable PowerPoint."""
     prs = Presentation()
-    prs.slide_width = Inches(slide_w_in)
-    prs.slide_height = Inches(slide_h_in)
+    prs.slide_width = Inches(13.333)
+    prs.slide_height = Inches(7.5)
 
-    slide = prs.slides.add_slide(prs.slide_layouts[6])  # blank
+    slide = prs.slides.add_slide(prs.slide_layouts[6])  # Blank layout
 
-    # Layout regions
-    margin_l, margin_r = 0.55, 0.45
-    margin_t, margin_b = 0.45, 0.45
+    # Dimensions
+    slide_w = Inches(13.333)
+    slide_h = Inches(7.5)
+    margin = Inches(0.3)
+    header_h = Inches(0.8)
+    timeline_h = Inches(0.4)
+    legend_h = Inches(0.4)
+    sidebar_w = Inches(1.6)
 
-    usable_w = slide_w_in - margin_l - margin_r
-    usable_h = slide_h_in - margin_t - margin_b
+    content_left = margin + sidebar_w
+    content_top = margin + header_h + timeline_h
+    content_w = slide_w - content_left - margin
+    content_h = slide_h - content_top - legend_h - margin
 
-    header_h = usable_h * 0.13
-    chart_h = usable_h - header_h
+    # Get categories and layout
+    categories = []
+    seen = set()
+    for it in items:
+        if it.category not in seen:
+            categories.append(it.category)
+            seen.add(it.category)
 
-    label_w = usable_w * 0.23
-    main_w = usable_w - label_w
+    from collections import defaultdict
+    cats = defaultdict(list)
+    for item in items:
+        cats[item.category].append(item)
 
-    header_left = margin_l
-    header_top = margin_t
-    chart_left = margin_l
-    chart_top = margin_t + header_h
+    # Compute sublanes per category
+    cat_layout = {}
+    total_sublanes = 0
+    for cat in categories:
+        assignments, num_sublanes = _assign_sublanes(cats[cat])
+        cat_layout[cat] = {"assignments": assignments, "num_sublanes": num_sublanes}
+        total_sublanes += num_sublanes
 
-    label_left = chart_left
-    main_left = chart_left + label_w
+    # Date range
+    chart_start = config.start_date or min(it.start_date for it in items) - timedelta(days=7)
+    chart_end = config.end_date or max(it.end_date for it in items) + timedelta(days=7)
+    total_days = (chart_end - chart_start).days
 
-    # Compute y layout in "units" and map to inches (same as matplotlib)
-    timeline_mode = choose_timeline_mode(overall_start, overall_end)
-    timeline_rows = 2 if timeline_mode in ("weeks", "quarters_years") else 1
-    timeline_row_h_units = 0.65
-    timeline_h_units = timeline_rows * timeline_row_h_units
-
-    bands, row_map, total_height_units = compute_bands_and_rows(workstreams_norm, visible_tasks)
-
-    total_units = total_height_units + timeline_h_units
-    inch_per_unit = chart_h / max(total_units, 1e-6)
-
-    timeline_row_h = timeline_row_h_units * inch_per_unit
-    timeline_h = timeline_h_units * inch_per_unit
-
-    lane_top = chart_top + timeline_h
-
-    # X mapping helpers
-    x0 = date_to_x(overall_start)
-    x1 = date_to_x(overall_end + timedelta(days=1))
-    total_x = max(x1 - x0, 1.0)
-
-    def x_to_in(x: float) -> float:
-        frac = (x - x0) / total_x
-        return main_left + frac * main_w
-
-    # Colors
-    c_border = "#DADADA"
-    c_grid = "#E6E6E6"
-    c_major = "#D0D0D0"
-    c_year = "#C8C8C8"
-    c_label_bg = "#F6F8FB"
-    c_band_alt = "#FAFAFA"
-    c_text = "#222222"
-
-    # -------------------------
-    # Header
-    # -------------------------
-    title_box = slide.shapes.add_textbox(Inches(header_left), Inches(header_top), Inches(usable_w * 0.72), Inches(header_h * 0.55))
+    # ── Header ───────────────────────────────────────────────────────────
+    title_box = slide.shapes.add_textbox(margin, Inches(0.15), Inches(8), Inches(0.5))
     tf = title_box.text_frame
-    tf.clear()
+    tf.word_wrap = True
     p = tf.paragraphs[0]
-    p.text = settings.chart_title
-    p.font.name = font_name
+    p.text = config.title
+    p.font.size = Pt(24)
     p.font.bold = True
-    p.font.size = Pt(30 if settings.page_size == "A3" else 24)
-    p.font.color.rgb = _hex_to_rgb("#111827")
+    p.font.color.rgb = _hex_to_rgb("#0F172A")
 
-    if settings.chart_subtitle:
-        sub_box = slide.shapes.add_textbox(Inches(header_left), Inches(header_top + header_h * 0.52), Inches(usable_w * 0.72), Inches(header_h * 0.35))
+    if config.subtitle:
+        sub_box = slide.shapes.add_textbox(margin, Inches(0.55), Inches(8), Inches(0.3))
         tf2 = sub_box.text_frame
-        tf2.clear()
         p2 = tf2.paragraphs[0]
-        p2.text = settings.chart_subtitle
-        p2.font.name = font_name
-        p2.font.size = Pt(14 if settings.page_size == "A3" else 12)
-        p2.font.color.rgb = _hex_to_rgb("#374151")
+        p2.text = config.subtitle
+        p2.font.size = Pt(12)
+        p2.font.color.rgb = _hex_to_rgb("#64748B")
 
-    if settings.confidentiality_label:
-        conf_box = slide.shapes.add_textbox(Inches(margin_l + usable_w * 0.74), Inches(header_top), Inches(usable_w * 0.26), Inches(header_h * 0.35))
-        tfc = conf_box.text_frame
-        tfc.clear()
-        pc = tfc.paragraphs[0]
-        pc.text = settings.confidentiality_label
-        pc.font.name = font_name
-        pc.font.size = Pt(12)
-        pc.font.color.rgb = _hex_to_rgb("#374151")
-        pc.alignment = PP_ALIGN.RIGHT
+    # Date range text
+    date_box = slide.shapes.add_textbox(Inches(9), Inches(0.3), Inches(4), Inches(0.3))
+    tf3 = date_box.text_frame
+    p3 = tf3.paragraphs[0]
+    p3.text = f"{chart_start.strftime('%b %d, %Y')}  →  {chart_end.strftime('%b %d, %Y')}"
+    p3.font.size = Pt(10)
+    p3.font.color.rgb = _hex_to_rgb("#94A3B8")
+    p3.alignment = PP_ALIGN.RIGHT
 
-    date_range_text = f"{overall_start.strftime('%d %b %Y')} – {overall_end.strftime('%d %b %Y')}"
-    dr_box = slide.shapes.add_textbox(Inches(header_left), Inches(header_top + header_h * 0.82), Inches(usable_w * 0.6), Inches(header_h * 0.25))
-    tfd = dr_box.text_frame
-    tfd.clear()
-    pd = tfd.paragraphs[0]
-    pd.text = date_range_text
-    pd.font.name = font_name
-    pd.font.size = Pt(12)
-    pd.font.color.rgb = _hex_to_rgb("#374151")
+    # ── Timeline header ──────────────────────────────────────────────────
+    from block_renderer import _compute_time_columns
+    time_columns, _ = _compute_time_columns(chart_start, chart_end)
 
-    # Divider line under header
-    div = slide.shapes.add_connector(
-        MSO_CONNECTOR.STRAIGHT,
-        Inches(margin_l),
-        Inches(chart_top),
-        Inches(margin_l + usable_w),
-        Inches(chart_top),
-    )
-    div.line.color.rgb = _hex_to_rgb("#E6E6E6")
-    div.line.width = Pt(1.0)
+    timeline_top = margin + header_h
+    for i, (col_start, col_end, label) in enumerate(time_columns):
+        x_frac_start = max(0, (col_start - chart_start).days / total_days)
+        x_frac_end = min(1, (col_end - chart_start).days / total_days)
 
-    # -------------------------
-    # Background panels
-    # -------------------------
-    # Label column background
-    lab_bg = slide.shapes.add_shape(
-        MSO_SHAPE.RECTANGLE,
-        Inches(label_left),
-        Inches(chart_top),
-        Inches(label_w),
-        Inches(chart_h),
-    )
-    lab_bg.fill.solid()
-    lab_bg.fill.fore_color.rgb = _hex_to_rgb(c_label_bg)
-    lab_bg.line.fill.background()  # no outline
+        left = content_left + int(content_w * x_frac_start)
+        width = int(content_w * (x_frac_end - x_frac_start))
 
-    # Main background (white)
-    main_bg = slide.shapes.add_shape(
-        MSO_SHAPE.RECTANGLE,
-        Inches(main_left),
-        Inches(chart_top),
-        Inches(main_w),
-        Inches(chart_h),
-    )
-    main_bg.fill.solid()
-    main_bg.fill.fore_color.rgb = _hex_to_rgb("#FFFFFF")
-    main_bg.line.fill.background()
-
-    # Vertical divider between labels and main
-    vdiv = slide.shapes.add_connector(
-        MSO_CONNECTOR.STRAIGHT,
-        Inches(main_left),
-        Inches(chart_top),
-        Inches(main_left),
-        Inches(chart_top + chart_h),
-    )
-    vdiv.line.color.rgb = _hex_to_rgb("#E0E0E0")
-    vdiv.line.width = Pt(1.0)
-
-    # Separator line between timeline band and swimlanes
-    sep = slide.shapes.add_connector(
-        MSO_CONNECTOR.STRAIGHT,
-        Inches(main_left),
-        Inches(lane_top),
-        Inches(main_left + main_w),
-        Inches(lane_top),
-    )
-    sep.line.color.rgb = _hex_to_rgb(c_major)
-    sep.line.width = Pt(1.3)
-
-    # Label side timeline separator as well
-    sep2 = slide.shapes.add_connector(
-        MSO_CONNECTOR.STRAIGHT,
-        Inches(label_left),
-        Inches(lane_top),
-        Inches(label_left + label_w),
-        Inches(lane_top),
-    )
-    sep2.line.color.rgb = _hex_to_rgb(c_major)
-    sep2.line.width = Pt(1.3)
-
-    # -------------------------
-    # Timeline header band
-    # -------------------------
-
-    def _add_timeline_row(
-        *,
-        row_index: int,
-        kind: str,
-        segs: List[Tuple[date, date, str]],
-    ) -> None:
-        top_in = chart_top + row_index * timeline_row_h
-        for i, (ds, de, label) in enumerate(segs):
-            xs = x_to_in(date_to_x(ds))
-            xe = x_to_in(date_to_x(de))
-            w_in = max(xe - xs, 0.02)
-            rect = slide.shapes.add_shape(
-                MSO_SHAPE.RECTANGLE,
-                Inches(xs),
-                Inches(top_in),
-                Inches(w_in),
-                Inches(timeline_row_h),
-            )
-            rect.fill.solid()
-            rect.fill.fore_color.rgb = _hex_to_rgb("#FFFFFF" if (i % 2 == 0) else "#F7F7F7")
-            rect.line.color.rgb = _hex_to_rgb(c_border)
-            rect.line.width = Pt(0.8)
-
-            # Centered label
-            tb = slide.shapes.add_textbox(
-                Inches(xs),
-                Inches(top_in + timeline_row_h * 0.05),
-                Inches(w_in),
-                Inches(timeline_row_h * 0.9),
-            )
-            tf = tb.text_frame
-            tf.clear()
-            tf.vertical_anchor = MSO_VERTICAL_ANCHOR.MIDDLE
-            p = tf.paragraphs[0]
-            p.alignment = PP_ALIGN.CENTER
-            p.text = label
-            p.font.name = font_name
-            if kind == "weeks":
-                p.font.size = Pt(10)
-            elif kind == "months":
-                p.font.size = Pt(11)
-            elif kind == "quarters":
-                p.font.size = Pt(12)
-            else:
-                p.font.size = Pt(12)
-            p.font.color.rgb = _hex_to_rgb("#333333")
-
-    if timeline_mode == "weeks":
-        month_segs = _build_month_segments(overall_start, overall_end)
-        week_segs = _build_week_segments(overall_start, overall_end, settings.week_start_day)
-        _add_timeline_row(row_index=0, kind="months", segs=month_segs)
-        _add_timeline_row(row_index=1, kind="weeks", segs=week_segs)
-    elif timeline_mode == "months":
-        month_segs = _build_month_segments(overall_start, overall_end)
-        _add_timeline_row(row_index=0, kind="months", segs=month_segs)
-    elif timeline_mode == "quarters":
-        q_segs = _build_quarter_segments(overall_start, overall_end, include_year=True)
-        _add_timeline_row(row_index=0, kind="quarters", segs=q_segs)
-    else:
-        y_segs = _build_year_segments(overall_start, overall_end)
-        q_segs = _build_quarter_segments(overall_start, overall_end, include_year=False)
-        _add_timeline_row(row_index=0, kind="years", segs=y_segs)
-        _add_timeline_row(row_index=1, kind="quarters", segs=q_segs)
-
-    # -------------------------
-    # Vertical grid lines
-    # -------------------------
-    lane_bottom = chart_top + chart_h
-
-    def _vline(d: date, *, color: str, width_pt: float) -> None:
-        x = x_to_in(date_to_x(d))
-        ln = slide.shapes.add_connector(
-            MSO_CONNECTOR.STRAIGHT,
-            Inches(x),
-            Inches(lane_top),
-            Inches(x),
-            Inches(lane_bottom),
-        )
-        ln.line.color.rgb = _hex_to_rgb(color)
-        ln.line.width = Pt(width_pt)
-
-    if timeline_mode == "weeks":
-        for d in _iter_week_starts(overall_start, overall_end, settings.week_start_day):
-            _vline(d, color=c_grid, width_pt=0.75)
-        for d in _iter_month_starts(overall_start, overall_end):
-            _vline(d, color=c_major, width_pt=1.2)
-    elif timeline_mode == "months":
-        for d in _iter_month_starts(overall_start, overall_end):
-            _vline(d, color=c_grid, width_pt=0.9)
-        for d in _iter_year_starts(overall_start, overall_end):
-            _vline(d, color=c_year, width_pt=1.4)
-    else:
-        for d in _iter_quarter_starts(overall_start, overall_end):
-            _vline(d, color=c_grid, width_pt=1.0)
-        for d in _iter_year_starts(overall_start, overall_end):
-            _vline(d, color=c_year, width_pt=1.6)
-
-    # -------------------------
-    # Workstream bands + labels
-    # -------------------------
-    for i, band in enumerate(bands):
-        y0_in = lane_top + band.y0 * inch_per_unit
-        y1_in = lane_top + band.y1 * inch_per_unit
-        h_in = max(y1_in - y0_in, 0.02)
-
-        # alternating band fill
-        if i % 2 == 0:
-            rect = slide.shapes.add_shape(
-                MSO_SHAPE.RECTANGLE,
-                Inches(main_left),
-                Inches(y0_in),
-                Inches(main_w),
-                Inches(h_in),
-            )
-            rect.fill.solid()
-            rect.fill.fore_color.rgb = _hex_to_rgb(c_band_alt)
-            rect.line.fill.background()
-
-        # band separators
-        for y in (y0_in, y1_in):
-            ln = slide.shapes.add_connector(
-                MSO_CONNECTOR.STRAIGHT,
-                Inches(main_left),
-                Inches(y),
-                Inches(main_left + main_w),
-                Inches(y),
-            )
-            ln.line.color.rgb = _hex_to_rgb(c_major)
-            ln.line.width = Pt(1.0)
-
-            ln2 = slide.shapes.add_connector(
-                MSO_CONNECTOR.STRAIGHT,
-                Inches(label_left),
-                Inches(y),
-                Inches(label_left + label_w),
-                Inches(y),
-            )
-            ln2.line.color.rgb = _hex_to_rgb(c_major)
-            ln2.line.width = Pt(1.0)
-
-        # workstream accent bar + name
-        ws_color = ws_color_map.get(band.workstream, "#1F77B4")
-        accent_w = max(label_w * 0.06, 0.08)
-        accent = slide.shapes.add_shape(
+        shape = slide.shapes.add_shape(
             MSO_SHAPE.RECTANGLE,
-            Inches(label_left + 0.12),
-            Inches(y0_in + 0.06),
-            Inches(accent_w),
-            Inches(max(h_in - 0.12, 0.02)),
+            left, int(timeline_top), max(width, Inches(0.1)), int(timeline_h),
         )
-        accent.fill.solid()
-        accent.fill.fore_color.rgb = _hex_to_rgb(ws_color)
-        accent.line.fill.background()
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = _hex_to_rgb("#334155" if i % 2 == 0 else "#1E293B")
+        shape.line.fill.background()
 
-        name_box = slide.shapes.add_textbox(
-            Inches(label_left + 0.12 + accent_w + 0.12),
-            Inches(y0_in),
-            Inches(label_w - (0.12 + accent_w + 0.22)),
-            Inches(h_in),
-        )
-        tf = name_box.text_frame
-        tf.clear()
-        tf.vertical_anchor = MSO_VERTICAL_ANCHOR.MIDDLE
+        tf = shape.text_frame
+        tf.word_wrap = False
         p = tf.paragraphs[0]
-        p.text = band.workstream
-        p.font.name = font_name
-        p.font.bold = True
-        p.font.size = Pt(14 if settings.page_size == "A3" else 12)
-        p.font.color.rgb = _hex_to_rgb(c_text)
+        p.text = label
+        p.font.size = Pt(8)
+        p.font.color.rgb = _hex_to_rgb("#F1F5F9")
+        p.alignment = PP_ALIGN.CENTER
+        tf.paragraphs[0].space_before = Pt(0)
+        tf.paragraphs[0].space_after = Pt(0)
 
-    # sublane lines
-    for (ws, lane), row in row_map.items():
-        y = lane_top + row.y0 * inch_per_unit
-        ln = slide.shapes.add_connector(
-            MSO_CONNECTOR.STRAIGHT,
-            Inches(main_left),
-            Inches(y),
-            Inches(main_left + main_w),
-            Inches(y),
+    # ── Swim lanes and tasks ─────────────────────────────────────────────
+    if total_sublanes == 0:
+        total_sublanes = 1
+    sublane_h = content_h / total_sublanes
+    current_y = content_top
+    row_padding = Inches(0.03)
+
+    for cat_idx, cat in enumerate(categories):
+        info = cat_layout[cat]
+        num_sublanes = info["num_sublanes"]
+        lane_h = int(sublane_h * num_sublanes)
+        color = config.get_category_color(cat, categories)
+        bg_color = _lighten_color(color, 0.92)
+
+        # Lane background
+        bg_shape = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE,
+            int(content_left), int(current_y), int(content_w), lane_h,
         )
-        ln.line.color.rgb = _hex_to_rgb("#EFEFEF")
-        ln.line.width = Pt(0.6)
+        bg_shape.fill.solid()
+        bg_shape.fill.fore_color.rgb = _hex_to_rgb(bg_color)
+        bg_shape.line.color.rgb = _hex_to_rgb("#E2E8F0")
+        bg_shape.line.width = Pt(0.5)
 
-    # -------------------------
-    # Today line
-    # -------------------------
-    if settings.show_today_line:
-        tz = ZoneInfo(settings.timezone)
-        today = settings.today_line_date
-        if today is None:
-            today = datetime.now(tz=tz).date()
-        if overall_start <= today <= overall_end:
-            xt = x_to_in(date_to_x(today))
-            ln = slide.shapes.add_connector(
-                MSO_CONNECTOR.STRAIGHT,
-                Inches(xt),
-                Inches(chart_top),
-                Inches(xt),
-                Inches(lane_bottom),
-            )
-            ln.line.color.rgb = _hex_to_rgb("#111111")
-            ln.line.width = Pt(1.25)
-            ln.line.dash_style = MSO_LINE_DASH_STYLE.DASH
-
-            # small label
-            tb = slide.shapes.add_textbox(
-                Inches(min(xt + 0.06, main_left + main_w - 0.6)),
-                Inches(chart_top + 0.02),
-                Inches(0.6),
-                Inches(0.25),
-            )
-            tf = tb.text_frame
-            tf.clear()
-            p = tf.paragraphs[0]
-            p.text = "Today"
-            p.font.name = font_name
-            p.font.size = Pt(10)
-            p.font.color.rgb = _hex_to_rgb("#111111")
-
-    # -------------------------
-    # Tasks
-    # -------------------------
-    # Status styling (clearer differentiation)
-    # We match the PNG/PDF renderer: a left status stripe + stronger border styles.
-    STATUS_STYLE = {
-        "planned": {"stripe": "#6B7280", "edge": "#3A3A3A", "lw": 1.0, "dash": None, "lighten": 0.0},
-        "in_progress": {"stripe": "#2563EB", "edge": "#2563EB", "lw": 2.0, "dash": MSO_LINE_DASH_STYLE.DASH, "lighten": 0.0},
-        "done": {"stripe": "#16A34A", "edge": "#6B7280", "lw": 1.0, "dash": None, "lighten": 0.65},
-        "risk": {"stripe": "#DC2626", "edge": "#DC2626", "lw": 2.25, "dash": None, "lighten": 0.0},
-    }
-
-    row_padding_units = 0.12
-    for t in visible_tasks:
-        lane = int(t.sublane or 0)
-        row = row_map.get((t.workstream, lane))
-        if row is None:
-            continue
-
-        # vertical placement
-        y0_in = lane_top + (row.y0 + row_padding_units) * inch_per_unit
-        lane_h_in = 1.0 * inch_per_unit
-        pad_in = row_padding_units * inch_per_unit
-        h_in = max(lane_h_in - 2 * pad_in, 0.05)
-
-        ws_color = ws_color_map.get(t.workstream, "#1F77B4")
-        face = t.color_override or ws_color
-
-        status = (t.status or "planned").lower() if t.status else "planned"
-        style = STATUS_STYLE.get(status, STATUS_STYLE["planned"])
-        edge = style["edge"]
-        lw = float(style["lw"])
-        dash = style["dash"]
-        stripe_color = style["stripe"]
-
-        if float(style.get("lighten", 0.0)) > 0:
-            face = _lighten_hex(face, float(style["lighten"]))
-
-        if t.type == "milestone":
-            cx = x_to_in(date_to_x(t.start_date))
-            day_in = main_w / total_x
-            diamond_w = max(day_in * 0.70, 0.12)
-            diamond_h = min(h_in * 0.85, 0.32)
-            left = cx - diamond_w / 2.0
-            top = y0_in + (h_in - diamond_h) / 2.0
-            shp = slide.shapes.add_shape(
-                MSO_SHAPE.DIAMOND,
-                Inches(left),
-                Inches(top),
-                Inches(diamond_w),
-                Inches(diamond_h),
-            )
-            shp.fill.solid()
-            shp.fill.fore_color.rgb = _hex_to_rgb(face)
-            shp.line.color.rgb = _hex_to_rgb(edge)
-            shp.line.width = Pt(lw)
-            if dash is not None:
-                shp.line.dash_style = dash
-            if t.hyperlink:
-                shp.click_action.hyperlink.address = t.hyperlink
-
-            # label to the right
-            label_left = min(cx + diamond_w / 2.0 + 0.08, main_left + main_w - 0.2)
-            label_w = max(main_left + main_w - label_left - 0.05, 0.4)
-            tb = slide.shapes.add_textbox(
-                Inches(label_left),
-                Inches(y0_in),
-                Inches(label_w),
-                Inches(h_in),
-            )
-            ft = tb.text_frame
-            ft.clear()
-            ft.vertical_anchor = MSO_VERTICAL_ANCHOR.MIDDLE
-            p = ft.paragraphs[0]
-            p.text = t.title
-            p.font.name = font_name
-            p.font.size = Pt(12)
-            p.font.color.rgb = _hex_to_rgb("#111111")
-            continue
-
-        # block
-        bx0, bx1 = block_span_inclusive(t.start_date, t.end_date)
-        if (bx1 - bx0) < 0.8:
-            bx1 = bx0 + 0.8
-
-        left = x_to_in(bx0)
-        right = x_to_in(bx1)
-        w_in = max(right - left, 0.08)
-
-        shp = slide.shapes.add_shape(
-            MSO_SHAPE.ROUNDED_RECTANGLE,
-            Inches(left),
-            Inches(y0_in),
-            Inches(w_in),
-            Inches(h_in),
+        # Sidebar label
+        label_shape = slide.shapes.add_textbox(
+            margin, int(current_y), int(sidebar_w), lane_h,
         )
-        shp.fill.solid()
-        shp.fill.fore_color.rgb = _hex_to_rgb(face)
-        shp.line.color.rgb = _hex_to_rgb(edge)
-        shp.line.width = Pt(lw)
-        if dash is not None:
-            shp.line.dash_style = dash
-
-        if t.hyperlink:
-            shp.click_action.hyperlink.address = t.hyperlink
-
-        # Status stripe (kept thin and consistent)
-        stripe_w = min(max(w_in * 0.12, 0.06), w_in * 0.35, 0.12)
-        if stripe_w > 0:
-            stripe = slide.shapes.add_shape(
-                MSO_SHAPE.RECTANGLE,
-                Inches(left),
-                Inches(y0_in),
-                Inches(stripe_w),
-                Inches(h_in),
-            )
-            stripe.fill.solid()
-            stripe.fill.fore_color.rgb = _hex_to_rgb(stripe_color)
-            stripe.line.fill.background()
-            if t.hyperlink:
-                stripe.click_action.hyperlink.address = t.hyperlink
-
-        # Text
-        tf = shp.text_frame
-        tf.clear()
+        tf = label_shape.text_frame
         tf.word_wrap = True
-        tf.auto_size = MSO_AUTO_SIZE.NONE
-        tf.vertical_anchor = MSO_VERTICAL_ANCHOR.MIDDLE
-        tf.margin_left = Inches(0.06 + stripe_w)
-        tf.margin_right = Inches(0.05)
-        tf.margin_top = Inches(0.02)
-        tf.margin_bottom = Inches(0.02)
-
-        fitted = fit_text_ppt(
-            t.title,
-            t.description,
-            width_in=max(w_in - (0.12 + stripe_w), 0.2),
-            height_in=max(h_in - 0.06, 0.15),
-        )
-
-        # Title lines (bold)
-        first = True
-        for line in fitted.title_lines:
-            p = tf.paragraphs[0] if first else tf.add_paragraph()
-            first = False
-            p.text = line
-            p.font.name = font_name
-            p.font.bold = True
-            p.font.size = Pt(fitted.font_size_pt)
-            p.font.color.rgb = _hex_to_rgb("#1A1A1A" if status != "done" else "#4A4A4A")
-            p.space_after = Pt(0)
-
-        # Description lines
-        for line in fitted.desc_lines:
-            p = tf.add_paragraph()
-            p.text = line
-            p.font.name = font_name
-            p.font.bold = False
-            p.font.size = Pt(max(fitted.font_size_pt - 1, 7))
-            p.font.color.rgb = _hex_to_rgb("#1A1A1A" if status != "done" else "#4A4A4A")
-            p.space_after = Pt(0)
-
-    # -------------------------
-    # Minimal legend (only if it adds value)
-    # -------------------------
-    statuses_present = {((t.status or "planned").lower()) for t in visible_tasks}
-    if len(statuses_present) > 1:
-        order = {"planned": 0, "in_progress": 1, "risk": 2, "done": 3}
-        statuses_sorted = sorted(statuses_present, key=lambda s: order.get(s, 99))
-        legend_left = main_left
-        legend_top = chart_top + chart_h + 0.05 - margin_b
-        # If we don't have room below, tuck into header bottom-right.
-        if legend_top + 0.35 > slide_h_in - 0.05:
-            legend_top = header_top + header_h * 0.78
-            legend_left = margin_l + usable_w * 0.62
-
-        tb = slide.shapes.add_textbox(Inches(legend_left), Inches(legend_top), Inches(0.8), Inches(0.25))
-        tf = tb.text_frame
-        tf.clear()
         p = tf.paragraphs[0]
-        p.text = "Legend:"
-        p.font.name = font_name
-        p.font.size = Pt(11)
-        p.font.color.rgb = _hex_to_rgb("#111111")
+        p.text = cat
+        p.font.size = Pt(10)
+        p.font.bold = True
+        p.font.color.rgb = _hex_to_rgb(color)
+        p.alignment = PP_ALIGN.RIGHT
+        tf.paragraphs[0].space_before = Pt(0)
 
-        label_map = {
-            "planned": "Planned",
-            "in_progress": "In progress",
-            "done": "Done",
-            "risk": "Risk",
-        }
+        # Color bar indicator
+        bar_shape = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE,
+            int(content_left - Inches(0.06)), int(current_y), Inches(0.06), lane_h,
+        )
+        bar_shape.fill.solid()
+        bar_shape.fill.fore_color.rgb = _hex_to_rgb(color)
+        bar_shape.line.fill.background()
 
-        x_cursor = legend_left + 0.85
-        sample_w = 0.28
-        sample_h = 0.18
-        stripe_frac = 0.28
+        # Tasks
+        for item, sublane in info["assignments"]:
+            bar_color = item.color_override if item.color_override else color
+            txt_color = _text_color_for_bg(bar_color)
 
-        for s in statuses_sorted:
-            style = STATUS_STYLE.get(s, STATUS_STYLE["planned"])
-            edge = style["edge"]
-            lw = float(style["lw"])
-            dash = style.get("dash")
-            stripe_color = style["stripe"]
+            x_frac_start = max(0, (item.start_date - chart_start).days / total_days)
+            x_frac_end = min(1, (item.end_date - chart_start).days / total_days)
+            if x_frac_end <= x_frac_start:
+                x_frac_end = x_frac_start + 1 / total_days
 
-            box = slide.shapes.add_shape(
-                MSO_SHAPE.RECTANGLE,
-                Inches(x_cursor),
-                Inches(legend_top + 0.02),
-                Inches(sample_w),
-                Inches(sample_h),
+            left = content_left + int(content_w * x_frac_start)
+            width = max(int(content_w * (x_frac_end - x_frac_start)), Inches(0.15))
+            top = int(current_y + sublane * sublane_h + row_padding)
+            height = max(int(sublane_h - row_padding * 2), Inches(0.2))
+
+            if item.is_milestone:
+                mid_x = left + width // 2
+                mid_y = top + height // 2
+                size = min(Inches(0.2), height // 2)
+                shape = slide.shapes.add_shape(
+                    MSO_SHAPE.DIAMOND,
+                    mid_x - size, mid_y - size, size * 2, size * 2,
+                )
+                shape.fill.solid()
+                shape.fill.fore_color.rgb = _hex_to_rgb(bar_color)
+                shape.line.color.rgb = _hex_to_rgb(_darken_color(bar_color))
+                shape.line.width = Pt(1)
+            else:
+                shape = slide.shapes.add_shape(
+                    MSO_SHAPE.ROUNDED_RECTANGLE,
+                    left, top, width, height,
+                )
+                shape.fill.solid()
+                shape.fill.fore_color.rgb = _hex_to_rgb(bar_color)
+                shape.line.color.rgb = _hex_to_rgb(_darken_color(bar_color, 0.15))
+                shape.line.width = Pt(0.75)
+
+                # Task text
+                tf = shape.text_frame
+                tf.word_wrap = True
+                tf.auto_size = None
+                p = tf.paragraphs[0]
+                p.text = item.title
+                p.font.size = Pt(min(9, max(6, int(height / Inches(0.05)))))
+                p.font.color.rgb = _hex_to_rgb(txt_color)
+                p.font.bold = True
+                p.alignment = PP_ALIGN.LEFT
+                tf.paragraphs[0].space_before = Pt(1)
+                tf.paragraphs[0].space_after = Pt(0)
+
+        current_y += lane_h
+
+    # Save
+    buf = io.BytesIO()
+    prs.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+# ── Block Diagram PPTX ───────────────────────────────────────────────────────
+
+def export_block_pptx(items: List[WorkItem], config: ChartConfig) -> bytes:
+    """Export block diagram as editable PowerPoint."""
+    prs = Presentation()
+    prs.slide_width = Inches(13.333)
+    prs.slide_height = Inches(7.5)
+
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+
+    slide_w = prs.slide_width
+    slide_h = prs.slide_height
+    margin = Inches(0.3)
+    header_h = Inches(0.8)
+    timeline_h = Inches(0.35)
+    legend_h = Inches(0.4)
+
+    content_left = margin
+    content_top = margin + header_h + timeline_h
+    content_w = slide_w - margin * 2
+    content_h = slide_h - content_top - legend_h
+
+    categories = []
+    seen = set()
+    for it in items:
+        if it.category not in seen:
+            categories.append(it.category)
+            seen.add(it.category)
+
+    chart_start = config.start_date or min(it.start_date for it in items) - timedelta(days=3)
+    chart_end = config.end_date or max(it.end_date for it in items) + timedelta(days=3)
+    total_days = (chart_end - chart_start).days
+
+    # Header
+    title_box = slide.shapes.add_textbox(margin, Inches(0.15), Inches(8), Inches(0.5))
+    tf = title_box.text_frame
+    p = tf.paragraphs[0]
+    p.text = config.title
+    p.font.size = Pt(24)
+    p.font.bold = True
+    p.font.color.rgb = _hex_to_rgb("#0F172A")
+
+    if config.subtitle:
+        sub_box = slide.shapes.add_textbox(margin, Inches(0.55), Inches(8), Inches(0.3))
+        tf2 = sub_box.text_frame
+        p2 = tf2.paragraphs[0]
+        p2.text = config.subtitle
+        p2.font.size = Pt(12)
+        p2.font.color.rgb = _hex_to_rgb("#64748B")
+
+    # Timeline header
+    from block_renderer import _compute_time_columns, _pack_rows
+    time_columns, _ = _compute_time_columns(chart_start, chart_end)
+    timeline_top = margin + header_h
+
+    for i, (col_start, col_end, label) in enumerate(time_columns):
+        x_frac_start = max(0, (col_start - chart_start).days / total_days)
+        x_frac_end = min(1, (col_end - chart_start).days / total_days)
+        left = int(content_left + content_w * x_frac_start)
+        width = max(int(content_w * (x_frac_end - x_frac_start)), Inches(0.1))
+
+        shape = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE,
+            left, int(timeline_top), width, int(timeline_h),
+        )
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = _hex_to_rgb("#334155" if i % 2 == 0 else "#1E293B")
+        shape.line.fill.background()
+
+        tf = shape.text_frame
+        p = tf.paragraphs[0]
+        p.text = label
+        p.font.size = Pt(8)
+        p.font.color.rgb = _hex_to_rgb("#F1F5F9")
+        p.alignment = PP_ALIGN.CENTER
+
+    # Pack rows
+    packed_rows = _pack_rows(items, chart_start, chart_end)
+    num_rows = max(1, len(packed_rows))
+    row_gap = Inches(0.05)
+    row_h = (content_h - row_gap * (num_rows + 1)) / num_rows
+
+    for row_idx, row_items in enumerate(packed_rows):
+        y_top = int(content_top + row_gap + row_idx * (row_h + row_gap))
+
+        for item in row_items:
+            x_frac_start = max(0, (item.start_date - chart_start).days / total_days)
+            x_frac_end = min(1, (item.end_date - chart_start).days / total_days)
+            if x_frac_end <= x_frac_start:
+                x_frac_end = x_frac_start + 1 / total_days
+
+            left = int(content_left + content_w * x_frac_start + Inches(0.03))
+            width = max(int(content_w * (x_frac_end - x_frac_start) - Inches(0.06)), Inches(0.15))
+            height = max(int(row_h), Inches(0.3))
+
+            bar_color = config.get_category_color(item.category, categories)
+            if item.color_override:
+                bar_color = item.color_override
+            txt_color = _text_color_for_bg(bar_color)
+
+            shape = slide.shapes.add_shape(
+                MSO_SHAPE.ROUNDED_RECTANGLE,
+                left, y_top, width, height,
             )
-            box.fill.solid()
-            box.fill.fore_color.rgb = _hex_to_rgb("#FFFFFF")
-            box.line.color.rgb = _hex_to_rgb(edge)
-            box.line.width = Pt(lw)
-            if dash is not None:
-                box.line.dash_style = dash
+            shape.fill.solid()
+            shape.fill.fore_color.rgb = _hex_to_rgb(bar_color)
+            shape.line.color.rgb = _hex_to_rgb(_darken_color(bar_color, 0.15))
+            shape.line.width = Pt(0.75)
 
-            stripe = slide.shapes.add_shape(
-                MSO_SHAPE.RECTANGLE,
-                Inches(x_cursor),
-                Inches(legend_top + 0.02),
-                Inches(sample_w * stripe_frac),
-                Inches(sample_h),
-            )
-            stripe.fill.solid()
-            stripe.fill.fore_color.rgb = _hex_to_rgb(stripe_color)
-            stripe.line.fill.background()
+            tf = shape.text_frame
+            tf.word_wrap = True
+            tf.auto_size = None
 
-            tb2 = slide.shapes.add_textbox(
-                Inches(x_cursor + sample_w + 0.08),
-                Inches(legend_top - 0.01),
-                Inches(0.95),
-                Inches(0.25),
-            )
-            tf2 = tb2.text_frame
-            tf2.clear()
-            p2 = tf2.paragraphs[0]
-            p2.text = label_map.get(s, s)
-            p2.font.name = font_name
-            p2.font.size = Pt(10)
-            p2.font.color.rgb = _hex_to_rgb("#111111")
+            # Label
+            if item.label:
+                p = tf.paragraphs[0]
+                p.text = item.label
+                p.font.size = Pt(7)
+                p.font.bold = True
+                p.font.color.rgb = _hex_to_rgb(txt_color)
+                p.font.italic = True
+                p.space_before = Pt(2)
+                p.space_after = Pt(0)
 
-            x_cursor += 1.18
+                p2 = tf.add_paragraph()
+                p2.text = item.title
+                p2.font.size = Pt(min(9, max(6, int(height / Inches(0.07)))))
+                p2.font.bold = True
+                p2.font.color.rgb = _hex_to_rgb(txt_color)
+                p2.space_before = Pt(1)
+                p2.space_after = Pt(0)
+            else:
+                p = tf.paragraphs[0]
+                p.text = item.title
+                p.font.size = Pt(min(9, max(6, int(height / Inches(0.07)))))
+                p.font.bold = True
+                p.font.color.rgb = _hex_to_rgb(txt_color)
+                p.space_before = Pt(2)
+                p.space_after = Pt(0)
 
-    bio = BytesIO()
-    prs.save(bio)
-    return bio.getvalue()
+            # Description
+            if item.description:
+                p3 = tf.add_paragraph()
+                desc = item.description[:100]
+                p3.text = f"• {desc}"
+                p3.font.size = Pt(min(7, max(5, int(height / Inches(0.1)))))
+                p3.font.color.rgb = _hex_to_rgb(txt_color)
+                p3.space_before = Pt(1)
+
+    # Legend
+    legend_y = int(slide_h - legend_h)
+    x_pos = int(margin)
+    for cat in categories:
+        color = config.get_category_color(cat, categories)
+
+        swatch = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            x_pos, legend_y + Inches(0.05), Inches(0.2), Inches(0.2),
+        )
+        swatch.fill.solid()
+        swatch.fill.fore_color.rgb = _hex_to_rgb(color)
+        swatch.line.fill.background()
+
+        label_box = slide.shapes.add_textbox(
+            x_pos + Inches(0.25), legend_y, Inches(1.5), Inches(0.3),
+        )
+        tf = label_box.text_frame
+        p = tf.paragraphs[0]
+        p.text = cat
+        p.font.size = Pt(9)
+        p.font.color.rgb = _hex_to_rgb("#334155")
+        p.font.bold = True
+
+        x_pos += Inches(0.25 + len(cat) * 0.08 + 0.3)
+
+    buf = io.BytesIO()
+    prs.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
