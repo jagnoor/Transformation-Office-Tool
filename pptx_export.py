@@ -457,3 +457,286 @@ def export_block_pptx(items: List[WorkItem], config: ChartConfig) -> bytes:
     prs.save(buf)
     buf.seek(0)
     return buf.getvalue()
+
+
+# ── Sequencing Diagram PPTX ──────────────────────────────────────────────────
+
+def export_sequencing_pptx(items: List[WorkItem], config: ChartConfig) -> bytes:
+    """Export sequencing diagram as editable PowerPoint."""
+    from sequencing_renderer import (
+        _parse_bullets, _layout_sequencing, _compute_two_row_timeline,
+    )
+
+    prs = Presentation()
+    prs.slide_width = Inches(13.333)
+    prs.slide_height = Inches(7.5)
+
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+
+    slide_w = prs.slide_width
+    slide_h = prs.slide_height
+    margin = Inches(0.3)
+    header_h = Inches(0.8)
+    quarter_h = Inches(0.3)
+    month_h = Inches(0.25)
+    sidebar_w = Inches(1.5)
+
+    content_left = margin + sidebar_w
+    content_top_y = margin + header_h + quarter_h + month_h
+    content_w = slide_w - content_left - margin
+    content_h = slide_h - content_top_y - margin
+
+    categories = []
+    seen = set()
+    for it in items:
+        if it.category not in seen:
+            categories.append(it.category)
+            seen.add(it.category)
+
+    chart_start = config.start_date or min(it.start_date for it in items) - timedelta(days=3)
+    chart_end = config.end_date or max(it.end_date for it in items) + timedelta(days=3)
+    total_days = (chart_end - chart_start).days
+
+    # ── Header ───────────────────────────────────────────────────────────
+    title_box = slide.shapes.add_textbox(margin, Inches(0.15), Inches(8), Inches(0.5))
+    tf = title_box.text_frame
+    p = tf.paragraphs[0]
+    p.text = config.title
+    p.font.size = Pt(24)
+    p.font.bold = True
+    p.font.color.rgb = _hex_to_rgb("#0F172A")
+
+    if config.subtitle:
+        sub_box = slide.shapes.add_textbox(margin, Inches(0.55), Inches(8), Inches(0.3))
+        tf2 = sub_box.text_frame
+        p2 = tf2.paragraphs[0]
+        p2.text = config.subtitle
+        p2.font.size = Pt(12)
+        p2.font.color.rgb = _hex_to_rgb("#64748B")
+
+    # Date range text
+    date_box = slide.shapes.add_textbox(Inches(9), Inches(0.3), Inches(4), Inches(0.3))
+    tf3 = date_box.text_frame
+    p3 = tf3.paragraphs[0]
+    p3.text = f"{chart_start.strftime('%b %d, %Y')}  \u2192  {chart_end.strftime('%b %d, %Y')}"
+    p3.font.size = Pt(10)
+    p3.font.color.rgb = _hex_to_rgb("#94A3B8")
+    p3.alignment = PP_ALIGN.RIGHT
+
+    # ── Two-row timeline ─────────────────────────────────────────────────
+    quarter_columns, month_columns = _compute_two_row_timeline(chart_start, chart_end)
+
+    quarter_top_y = margin + header_h
+    month_top_y = quarter_top_y + int(quarter_h)
+
+    for i, (col_start, col_end, label) in enumerate(quarter_columns):
+        x_frac_start = max(0, (col_start - chart_start).days / total_days)
+        x_frac_end = min(1, (col_end - chart_start).days / total_days)
+        left = int(content_left + content_w * x_frac_start)
+        width = max(int(content_w * (x_frac_end - x_frac_start)), Inches(0.1))
+
+        shape = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE,
+            left, int(quarter_top_y), width, int(quarter_h),
+        )
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = _hex_to_rgb("#334155" if i % 2 == 0 else "#1E293B")
+        shape.line.fill.background()
+
+        tf = shape.text_frame
+        p = tf.paragraphs[0]
+        p.text = label
+        p.font.size = Pt(9)
+        p.font.bold = True
+        p.font.color.rgb = _hex_to_rgb("#F1F5F9")
+        p.alignment = PP_ALIGN.CENTER
+
+    for i, (col_start, col_end, label) in enumerate(month_columns):
+        x_frac_start = max(0, (col_start - chart_start).days / total_days)
+        x_frac_end = min(1, (col_end - chart_start).days / total_days)
+        left = int(content_left + content_w * x_frac_start)
+        width = max(int(content_w * (x_frac_end - x_frac_start)), Inches(0.1))
+
+        shape = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE,
+            left, int(month_top_y), width, int(month_h),
+        )
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = _hex_to_rgb("#546378" if i % 2 == 0 else "#475569")
+        shape.line.fill.background()
+
+        tf = shape.text_frame
+        p = tf.paragraphs[0]
+        p.text = label
+        p.font.size = Pt(8)
+        p.font.color.rgb = _hex_to_rgb("#E2E8F0")
+        p.alignment = PP_ALIGN.CENTER
+
+    # ── Left-side legend ─────────────────────────────────────────────────
+    if config.show_legend:
+        legend_bg = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            int(margin), int(content_top_y), int(sidebar_w - Inches(0.1)), int(content_h),
+        )
+        legend_bg.fill.solid()
+        legend_bg.fill.fore_color.rgb = _hex_to_rgb("#F1F5F9")
+        legend_bg.line.color.rgb = _hex_to_rgb("#E2E8F0")
+        legend_bg.line.width = Pt(0.5)
+
+        # Legend title
+        legend_title = slide.shapes.add_textbox(
+            int(margin + Inches(0.1)), int(content_top_y + Inches(0.1)),
+            int(sidebar_w - Inches(0.3)), Inches(0.25),
+        )
+        tf = legend_title.text_frame
+        p = tf.paragraphs[0]
+        p.text = "LEGEND"
+        p.font.size = Pt(8)
+        p.font.bold = True
+        p.font.color.rgb = _hex_to_rgb("#64748B")
+
+        # Category entries
+        cat_y = content_top_y + Inches(0.4)
+        for cat in categories:
+            color = config.get_category_color(cat, categories)
+
+            swatch = slide.shapes.add_shape(
+                MSO_SHAPE.ROUNDED_RECTANGLE,
+                int(margin + Inches(0.1)), int(cat_y),
+                Inches(0.2), Inches(0.2),
+            )
+            swatch.fill.solid()
+            swatch.fill.fore_color.rgb = _hex_to_rgb(color)
+            swatch.line.fill.background()
+
+            label_box = slide.shapes.add_textbox(
+                int(margin + Inches(0.35)), int(cat_y - Inches(0.02)),
+                int(sidebar_w - Inches(0.5)), Inches(0.25),
+            )
+            tf = label_box.text_frame
+            p = tf.paragraphs[0]
+            p.text = cat
+            p.font.size = Pt(8)
+            p.font.bold = True
+            p.font.color.rgb = _hex_to_rgb("#334155")
+
+            cat_y += Inches(0.35)
+
+    # ── Blocks ───────────────────────────────────────────────────────────
+    content_w_inches = content_w / Inches(1)
+    content_h_inches = content_h / Inches(1)
+    base_line_h_inches = 8.5 * 0.016
+    base_line_h = base_line_h_inches / content_h_inches
+
+    layouts = _layout_sequencing(
+        items, chart_start, chart_end,
+        content_w_inches, content_h_inches,
+        base_line_h, 8.5,
+    )
+
+    # Scale layouts to fit if they overflow
+    if layouts:
+        min_y = min(l["y_bot"] for l in layouts)
+        if min_y < 0:
+            scale = 1.0 / (1.0 + abs(min_y) + 0.02)
+            for l in layouts:
+                l["y_top"] = 1.0 - (1.0 - l["y_top"]) / (1.0 + abs(min_y) + 0.02)
+                l["y_bot"] = l["y_top"] - l["height"] * scale
+                l["height"] = l["height"] * scale
+
+    for layout in layouts:
+        item = layout["item"]
+        x_s = layout["x_start"]
+        x_e = layout["x_end"]
+        y_top_frac = layout["y_top"]
+        y_bot_frac = layout["y_bot"]
+
+        left = int(content_left + content_w * x_s)
+        width = max(int(content_w * (x_e - x_s)), Inches(0.2))
+        top = int(content_top_y + content_h * (1.0 - y_top_frac))
+        height = max(int(content_h * (y_top_frac - y_bot_frac)), Inches(0.3))
+
+        bar_color = config.get_category_color(item.category, categories)
+        if item.color_override:
+            bar_color = item.color_override
+        fill_color = _lighten_color(bar_color, 0.55)
+        txt_color = _text_color_for_bg(fill_color)
+        border = _darken_color(bar_color, 0.1)
+
+        if item.is_milestone:
+            mid_x = left + width // 2
+            mid_y = top + height // 2
+            size = min(Inches(0.2), height // 2)
+            shape = slide.shapes.add_shape(
+                MSO_SHAPE.DIAMOND,
+                mid_x - size, mid_y - size, size * 2, size * 2,
+            )
+            shape.fill.solid()
+            shape.fill.fore_color.rgb = _hex_to_rgb(bar_color)
+            shape.line.color.rgb = _hex_to_rgb(border)
+            shape.line.width = Pt(1)
+            continue
+
+        shape = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            left, top, width, height,
+        )
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = _hex_to_rgb(fill_color)
+        shape.line.color.rgb = _hex_to_rgb(border)
+        shape.line.width = Pt(0.75)
+
+        tf = shape.text_frame
+        tf.word_wrap = True
+        tf.auto_size = None
+
+        font_sz = min(9, max(6, int(height / Inches(0.06))))
+
+        # Label
+        if item.label:
+            p = tf.paragraphs[0]
+            p.text = item.label
+            p.font.size = Pt(max(6, font_sz - 1))
+            p.font.bold = True
+            p.font.italic = True
+            p.font.color.rgb = _hex_to_rgb("#475569")
+            p.space_before = Pt(2)
+            p.space_after = Pt(0)
+
+            p2 = tf.add_paragraph()
+            title_text = item.title
+            if item.status == "done":
+                title_text += "  \u2713"
+            p2.text = title_text
+            p2.font.size = Pt(font_sz)
+            p2.font.bold = True
+            p2.font.color.rgb = _hex_to_rgb("#1E293B")
+            p2.space_before = Pt(1)
+            p2.space_after = Pt(0)
+        else:
+            p = tf.paragraphs[0]
+            title_text = item.title
+            if item.status == "done":
+                title_text += "  \u2713"
+            p.text = title_text
+            p.font.size = Pt(font_sz)
+            p.font.bold = True
+            p.font.color.rgb = _hex_to_rgb("#1E293B")
+            p.space_before = Pt(2)
+            p.space_after = Pt(0)
+
+        # Bullet points
+        bullets = _parse_bullets(item.description)
+        bullet_fs = max(5, font_sz - 2)
+        for bullet in bullets:
+            bp = tf.add_paragraph()
+            bp.text = f"\u2022 {bullet[:80]}"
+            bp.font.size = Pt(bullet_fs)
+            bp.font.color.rgb = _hex_to_rgb("#334155")
+            bp.space_before = Pt(0)
+            bp.space_after = Pt(0)
+
+    buf = io.BytesIO()
+    prs.save(buf)
+    buf.seek(0)
+    return buf.getvalue()

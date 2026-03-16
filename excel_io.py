@@ -184,35 +184,35 @@ def create_template_bytes() -> bytes:
     # Sample data — a realistic product launch roadmap that non-technical users can relate to
     sample_data = [
         # Marketing
-        ("Brand Refresh & Guidelines", "2025-01-06", "2025-02-14", "Marketing", "Update brand identity, logo, and style guide", "done", "Sarah", "M1"),
-        ("Website Redesign", "2025-01-20", "2025-03-31", "Marketing", "Complete redesign of company website", "in_progress", "Sarah", "M2"),
-        ("Product Launch Campaign", "2025-03-01", "2025-05-15", "Marketing", "Multi-channel launch campaign", "planned", "Tom", "M3"),
-        ("Customer Testimonials", "2025-04-01", "2025-05-01", "Marketing", "Gather and produce 10 video testimonials", "planned", "Sarah", "M4"),
-        ("Trade Show Preparation", "2025-05-01", "2025-06-15", "Marketing", "Booth design, materials, demos", "planned", "Tom", "M5"),
+        ("Brand Refresh & Guidelines", "2025-01-06", "2025-02-14", "Marketing", "Update brand identity; Redesign logo; Create style guide; Update templates", "done", "Sarah", "Delivery 1"),
+        ("Website Redesign", "2025-01-20", "2025-03-31", "Marketing", "Information architecture; UX wireframes; Visual design; Content migration; QA testing", "in_progress", "Sarah", "Delivery 2"),
+        ("Product Launch Campaign", "2025-03-01", "2025-05-15", "Marketing", "Campaign strategy; Social media content; Email sequences; Press releases; Launch event", "planned", "Tom", "Delivery 3"),
+        ("Customer Testimonials", "2025-04-01", "2025-05-01", "Marketing", "Identify customers; Schedule interviews; Video production; Post-production editing", "planned", "Sarah", "Delivery 4"),
+        ("Trade Show Preparation", "2025-05-01", "2025-06-15", "Marketing", "Booth design; Print materials; Demo stations; Staff training", "planned", "Tom", "Delivery 5"),
         # Product
-        ("Customer Research Interviews", "2025-01-06", "2025-02-07", "Product", "Interview 30 customers on pain points", "done", "Lisa", "P1"),
-        ("Product Requirements Document", "2025-02-01", "2025-02-28", "Product", "Define MVP features and specs", "done", "Lisa", "P2"),
-        ("UX/UI Design & Prototypes", "2025-02-15", "2025-04-15", "Product", "Design screens and clickable prototype", "in_progress", "Amy", "P3"),
-        ("Beta Testing Program", "2025-04-15", "2025-06-01", "Product", "Recruit 50 beta testers, gather feedback", "planned", "Lisa", "P4"),
-        ("Product Documentation", "2025-05-01", "2025-06-15", "Product", "User guides, help center articles", "planned", "Amy", "P5"),
+        ("Customer Research Interviews", "2025-01-06", "2025-02-07", "Product", "Recruit participants; Conduct interviews; Synthesize findings; Present insights", "done", "Lisa", "Delivery 6"),
+        ("Product Requirements Document", "2025-02-01", "2025-02-28", "Product", "Define MVP features; Write specifications; Stakeholder review; Final sign-off", "done", "Lisa", "Delivery 7"),
+        ("UX/UI Design & Prototypes", "2025-02-15", "2025-04-15", "Product", "User flows; Wireframes; High-fidelity mockups; Clickable prototype; Usability testing", "in_progress", "Amy", "Delivery 8"),
+        ("Beta Testing Program", "2025-04-15", "2025-06-01", "Product", "Recruit 50 beta testers; Onboarding; Feedback collection; Bug triage; Iteration", "planned", "Lisa", "Delivery 9"),
+        ("Product Documentation", "2025-05-01", "2025-06-15", "Product", "User guides; API documentation; Help center articles; Video tutorials", "planned", "Amy", "Delivery 10"),
         # Engineering
-        ("Core Platform Build", "2025-02-15", "2025-05-31", "Engineering", "Build backend services and database", "in_progress", "Mike", "E1"),
-        ("Mobile App Development", "2025-03-15", "2025-06-15", "Engineering", "iOS and Android app development", "planned", "Dave", "E2"),
-        ("Payment Integration", "2025-03-01", "2025-04-30", "Engineering", "Stripe and PayPal integration", "in_progress", "Mike", "E3"),
-        ("Performance & Load Testing", "2025-05-15", "2025-06-15", "Engineering", "Ensure system handles 10K users", "planned", "Dave", "E4"),
-        ("Security Audit & Fixes", "2025-06-01", "2025-06-30", "Engineering", "Third-party security assessment", "planned", "Mike", "E5"),
+        ("Core Platform Build", "2025-02-15", "2025-05-31", "Engineering", "Backend services; Database design; API gateway; Authentication; CI/CD pipeline", "in_progress", "Mike", "Delivery 11"),
+        ("Mobile App Development", "2025-03-15", "2025-06-15", "Engineering", "iOS development; Android development; Push notifications; Offline mode", "planned", "Dave", "Delivery 12"),
+        ("Payment Integration", "2025-03-01", "2025-04-30", "Engineering", "Stripe integration; PayPal integration; Webhook handling; Reconciliation", "in_progress", "Mike", "Delivery 13"),
+        ("Performance & Load Testing", "2025-05-15", "2025-06-15", "Engineering", "Load test scripts; Stress testing; Performance optimization; Capacity planning", "planned", "Dave", "Delivery 14"),
+        ("Security Audit & Fixes", "2025-06-01", "2025-06-30", "Engineering", "Third-party assessment; Vulnerability remediation; Penetration testing", "planned", "Mike", "Delivery 15"),
         # Operations
-        ("Vendor Selection", "2025-01-06", "2025-01-31", "Operations", "Evaluate and select key vendors", "done", "Karen", "O1"),
-        ("Hiring Plan Execution", "2025-01-13", "2025-04-30", "Operations", "Hire 8 new team members", "in_progress", "Karen", "O2"),
-        ("Office Expansion Setup", "2025-03-01", "2025-04-15", "Operations", "New floor buildout and move", "planned", "Karen", "O3"),
-        ("Partner Onboarding", "2025-04-01", "2025-05-31", "Operations", "Onboard 5 channel partners", "planned", "Rob", "O4"),
-        ("Launch Readiness Review", "2025-06-01", "2025-06-30", "Operations", "Final go/no-go checklist", "planned", "Karen", "O5"),
+        ("Vendor Selection", "2025-01-06", "2025-01-31", "Operations", "RFP process; Vendor evaluation; Contract negotiation; Final selection", "done", "Karen", "Delivery 16"),
+        ("Hiring Plan Execution", "2025-01-13", "2025-04-30", "Operations", "Job postings; Candidate screening; Interview rounds; Offer management; Onboarding", "in_progress", "Karen", "Delivery 17"),
+        ("Office Expansion Setup", "2025-03-01", "2025-04-15", "Operations", "Floor plan design; Construction; IT infrastructure; Furniture procurement", "planned", "Karen", "Delivery 18"),
+        ("Partner Onboarding", "2025-04-01", "2025-05-31", "Operations", "Partner agreements; Technical integration; Training sessions; Go-live support", "planned", "Rob", "Delivery 19"),
+        ("Launch Readiness Review", "2025-06-01", "2025-06-30", "Operations", "Checklist review; Risk assessment; Stakeholder sign-off; Go/no-go decision", "planned", "Karen", "Delivery 20"),
         # Sales
-        ("Sales Playbook Creation", "2025-02-01", "2025-03-15", "Sales", "Build pitch decks, battle cards, scripts", "in_progress", "Jake", "S1"),
-        ("Sales Team Training", "2025-03-15", "2025-04-15", "Sales", "Product training for 12 reps", "planned", "Jake", "S2"),
-        ("Pilot Customer Program", "2025-04-15", "2025-06-30", "Sales", "Sign 5 pilot customers", "planned", "Nina", "S3"),
-        ("CRM & Pipeline Setup", "2025-01-20", "2025-02-28", "Sales", "Configure Salesforce for new product", "done", "Nina", "S4"),
-        ("Pricing Strategy", "2025-02-15", "2025-03-15", "Sales", "Finalize pricing tiers and packages", "in_progress", "Jake", "S5"),
+        ("Sales Playbook Creation", "2025-02-01", "2025-03-15", "Sales", "Pitch decks; Battle cards; Objection handling scripts; ROI calculator", "in_progress", "Jake", "Delivery 21"),
+        ("Sales Team Training", "2025-03-15", "2025-04-15", "Sales", "Product training; Demo certification; Role-play exercises; Assessment", "planned", "Jake", "Delivery 22"),
+        ("Pilot Customer Program", "2025-04-15", "2025-06-30", "Sales", "Identify prospects; Negotiate terms; Onboard pilots; Success metrics", "planned", "Nina", "Delivery 23"),
+        ("CRM & Pipeline Setup", "2025-01-20", "2025-02-28", "Sales", "Salesforce configuration; Pipeline stages; Reporting dashboards; Data migration", "done", "Nina", "Delivery 24"),
+        ("Pricing Strategy", "2025-02-15", "2025-03-15", "Sales", "Competitive analysis; Pricing tiers; Discount framework; Approval workflows", "in_progress", "Jake", "Delivery 25"),
     ]
 
     data_font = Font(name="Calibri", size=11)
@@ -256,6 +256,11 @@ def create_template_bytes() -> bytes:
         ("", "• For milestones, set Start Date = End Date"),
         ("", "• The app auto-detects date ranges — no settings sheet needed"),
         ("", "• Column names are flexible: 'Name' works for 'Title', 'Team' for 'Category', etc."),
+        ("", ""),
+        ("Sequencing Diagram:", ""),
+        ("", "• Use the Label column for delivery numbers (e.g., 'Delivery 1', 'Delivery 2')"),
+        ("", "• Use semicolons in Description to create bullet points (e.g., 'Task A; Task B; Task C')"),
+        ("", "• Overlapping date ranges will visually overlap to show capacity constraints"),
     ]
 
     title_font = Font(name="Calibri", bold=True, size=16, color="1E293B")
