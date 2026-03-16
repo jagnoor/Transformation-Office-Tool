@@ -181,38 +181,39 @@ def create_template_bytes() -> bytes:
     ws.add_data_validation(status_dv)
     status_dv.add(f"F2:F200")
 
-    # Sample data — a realistic product launch roadmap that non-technical users can relate to
+    # Sample data — a 1-year transformation roadmap with 25 deliveries.
+    # Deliveries are prioritized (Delivery 1 = highest priority, starts first).
+    # Multiple workstreams run concurrently to create a dense Tetris-style visualization.
     sample_data = [
-        # Marketing
-        ("Brand Refresh & Guidelines", "2025-01-06", "2025-02-14", "Marketing", "Update brand identity; Redesign logo; Create style guide; Update templates", "done", "Sarah", "Delivery 1"),
-        ("Website Redesign", "2025-01-20", "2025-03-31", "Marketing", "Information architecture; UX wireframes; Visual design; Content migration; QA testing", "in_progress", "Sarah", "Delivery 2"),
-        ("Product Launch Campaign", "2025-03-01", "2025-05-15", "Marketing", "Campaign strategy; Social media content; Email sequences; Press releases; Launch event", "planned", "Tom", "Delivery 3"),
-        ("Customer Testimonials", "2025-04-01", "2025-05-01", "Marketing", "Identify customers; Schedule interviews; Video production; Post-production editing", "planned", "Sarah", "Delivery 4"),
-        ("Trade Show Preparation", "2025-05-01", "2025-06-15", "Marketing", "Booth design; Print materials; Demo stations; Staff training", "planned", "Tom", "Delivery 5"),
-        # Product
-        ("Customer Research Interviews", "2025-01-06", "2025-02-07", "Product", "Recruit participants; Conduct interviews; Synthesize findings; Present insights", "done", "Lisa", "Delivery 6"),
-        ("Product Requirements Document", "2025-02-01", "2025-02-28", "Product", "Define MVP features; Write specifications; Stakeholder review; Final sign-off", "done", "Lisa", "Delivery 7"),
-        ("UX/UI Design & Prototypes", "2025-02-15", "2025-04-15", "Product", "User flows; Wireframes; High-fidelity mockups; Clickable prototype; Usability testing", "in_progress", "Amy", "Delivery 8"),
-        ("Beta Testing Program", "2025-04-15", "2025-06-01", "Product", "Recruit 50 beta testers; Onboarding; Feedback collection; Bug triage; Iteration", "planned", "Lisa", "Delivery 9"),
-        ("Product Documentation", "2025-05-01", "2025-06-15", "Product", "User guides; API documentation; Help center articles; Video tutorials", "planned", "Amy", "Delivery 10"),
-        # Engineering
-        ("Core Platform Build", "2025-02-15", "2025-05-31", "Engineering", "Backend services; Database design; API gateway; Authentication; CI/CD pipeline", "in_progress", "Mike", "Delivery 11"),
-        ("Mobile App Development", "2025-03-15", "2025-06-15", "Engineering", "iOS development; Android development; Push notifications; Offline mode", "planned", "Dave", "Delivery 12"),
-        ("Payment Integration", "2025-03-01", "2025-04-30", "Engineering", "Stripe integration; PayPal integration; Webhook handling; Reconciliation", "in_progress", "Mike", "Delivery 13"),
-        ("Performance & Load Testing", "2025-05-15", "2025-06-15", "Engineering", "Load test scripts; Stress testing; Performance optimization; Capacity planning", "planned", "Dave", "Delivery 14"),
-        ("Security Audit & Fixes", "2025-06-01", "2025-06-30", "Engineering", "Third-party assessment; Vulnerability remediation; Penetration testing", "planned", "Mike", "Delivery 15"),
-        # Operations
-        ("Vendor Selection", "2025-01-06", "2025-01-31", "Operations", "RFP process; Vendor evaluation; Contract negotiation; Final selection", "done", "Karen", "Delivery 16"),
-        ("Hiring Plan Execution", "2025-01-13", "2025-04-30", "Operations", "Job postings; Candidate screening; Interview rounds; Offer management; Onboarding", "in_progress", "Karen", "Delivery 17"),
-        ("Office Expansion Setup", "2025-03-01", "2025-04-15", "Operations", "Floor plan design; Construction; IT infrastructure; Furniture procurement", "planned", "Karen", "Delivery 18"),
-        ("Partner Onboarding", "2025-04-01", "2025-05-31", "Operations", "Partner agreements; Technical integration; Training sessions; Go-live support", "planned", "Rob", "Delivery 19"),
-        ("Launch Readiness Review", "2025-06-01", "2025-06-30", "Operations", "Checklist review; Risk assessment; Stakeholder sign-off; Go/no-go decision", "planned", "Karen", "Delivery 20"),
-        # Sales
-        ("Sales Playbook Creation", "2025-02-01", "2025-03-15", "Sales", "Pitch decks; Battle cards; Objection handling scripts; ROI calculator", "in_progress", "Jake", "Delivery 21"),
-        ("Sales Team Training", "2025-03-15", "2025-04-15", "Sales", "Product training; Demo certification; Role-play exercises; Assessment", "planned", "Jake", "Delivery 22"),
-        ("Pilot Customer Program", "2025-04-15", "2025-06-30", "Sales", "Identify prospects; Negotiate terms; Onboard pilots; Success metrics", "planned", "Nina", "Delivery 23"),
-        ("CRM & Pipeline Setup", "2025-01-20", "2025-02-28", "Sales", "Salesforce configuration; Pipeline stages; Reporting dashboards; Data migration", "done", "Nina", "Delivery 24"),
-        ("Pricing Strategy", "2025-02-15", "2025-03-15", "Sales", "Competitive analysis; Pricing tiers; Discount framework; Approval workflows", "in_progress", "Jake", "Delivery 25"),
+        # Wave 1: Foundation (Jan–Mar) — 8 concurrent deliveries
+        ("Strategic Vision & Roadmap",   "2025-01-06", "2025-03-14", "Strategy",    "Define transformation goals; Stakeholder alignment; Success metrics; Executive sign-off", "done", "Sarah", "Delivery 1"),
+        ("Customer Research & Insights", "2025-01-06", "2025-03-28", "Product",     "Recruit participants; Conduct 30 interviews; Synthesize findings; Present to leadership", "done", "Lisa", "Delivery 2"),
+        ("Brand Identity Refresh",       "2025-01-06", "2025-04-11", "Marketing",   "New visual identity; Logo redesign; Brand guidelines; Template library; Asset rollout", "done", "Tom", "Delivery 3"),
+        ("Technology Assessment",        "2025-01-06", "2025-03-28", "Engineering", "Platform audit; Architecture review; Tool evaluation; Migration plan; Vendor demos", "done", "Mike", "Delivery 4"),
+        ("Vendor Selection & Contracts", "2025-01-06", "2025-02-28", "Operations",  "RFP process; Vendor demos; Contract negotiation; Legal review; Final selection", "done", "Karen", "Delivery 5"),
+        ("CRM & Pipeline Setup",         "2025-01-06", "2025-03-14", "Sales",       "Salesforce configuration; Pipeline stages; Reporting dashboards; Data migration", "done", "Nina", "Delivery 6"),
+        ("Pricing Strategy",             "2025-01-06", "2025-02-14", "Sales",       "Competitive analysis; Pricing tiers; Discount framework; Approval workflows", "done", "Jake", "Delivery 7"),
+        ("Hiring Plan Execution",        "2025-01-06", "2025-04-25", "Operations",  "Job postings; Candidate screening; Interview rounds; Offer management; Onboarding 12 roles", "done", "Karen", "Delivery 8"),
+        # Wave 2: Build (Mar–Jun) — 7 concurrent deliveries
+        ("Product Requirements & Specs", "2025-03-03", "2025-05-09", "Product",     "Define MVP features; Write specifications; Stakeholder review; Final sign-off", "in_progress", "Lisa", "Delivery 9"),
+        ("Website Redesign",             "2025-03-03", "2025-06-06", "Marketing",   "Information architecture; UX wireframes; Visual design; Content migration; QA testing", "in_progress", "Sarah", "Delivery 10"),
+        ("Core Platform Build",          "2025-03-03", "2025-07-11", "Engineering", "Backend services; Database design; API gateway; Authentication; CI/CD pipeline", "in_progress", "Mike", "Delivery 11"),
+        ("Sales Playbook Creation",      "2025-03-17", "2025-05-23", "Sales",       "Pitch decks; Battle cards; Objection handling; ROI calculator; Competitive positioning", "in_progress", "Jake", "Delivery 12"),
+        ("UX/UI Design & Prototypes",    "2025-04-07", "2025-06-20", "Product",     "User flows; Wireframes; High-fidelity mockups; Clickable prototype; Usability testing", "in_progress", "Amy", "Delivery 13"),
+        ("Payment Integration",          "2025-04-14", "2025-06-27", "Engineering", "Stripe integration; PayPal setup; Webhook handling; Reconciliation; PCI compliance", "in_progress", "Dave", "Delivery 14"),
+        ("Office Expansion Setup",       "2025-04-28", "2025-06-20", "Operations",  "Floor plan design; Construction; IT infrastructure; Furniture procurement; Move logistics", "planned", "Karen", "Delivery 15"),
+        # Wave 3: Scale (Jun–Sep) — 5 concurrent deliveries
+        ("Product Launch Campaign",      "2025-06-02", "2025-08-15", "Marketing",   "Campaign strategy; Social media content; Email sequences; Press releases; Launch event", "planned", "Tom", "Delivery 16"),
+        ("Mobile App Development",       "2025-06-16", "2025-09-19", "Engineering", "iOS development; Android development; Push notifications; Offline mode; App Store submission", "planned", "Mike", "Delivery 17"),
+        ("Sales Team Training",          "2025-06-16", "2025-08-08", "Sales",       "Product training; Demo certification; Role-play exercises; Assessment; Field readiness", "planned", "Jake", "Delivery 18"),
+        ("Beta Testing Program",         "2025-06-30", "2025-09-05", "Product",     "Recruit 50 beta testers; Onboarding; Feedback collection; Bug triage; Iteration cycles", "planned", "Lisa", "Delivery 19"),
+        ("Partner Onboarding Program",   "2025-07-14", "2025-09-19", "Operations",  "Partner agreements; Technical integration; Training sessions; Go-live support; SLA setup", "planned", "Rob", "Delivery 20"),
+        # Wave 4: Launch & Optimize (Sep–Dec) — 5 concurrent deliveries
+        ("Pilot Customer Program",       "2025-09-01", "2025-11-14", "Sales",       "Identify 10 prospects; Negotiate terms; Onboard pilots; Track success metrics; Case studies", "planned", "Nina", "Delivery 21"),
+        ("Performance & Load Testing",   "2025-09-01", "2025-10-31", "Engineering", "Load test scripts; Stress testing; Performance optimization; Capacity planning; SLA validation", "planned", "Dave", "Delivery 22"),
+        ("Product Documentation",        "2025-09-15", "2025-11-28", "Product",     "User guides; API documentation; Help center articles; Video tutorials; Knowledge base", "planned", "Amy", "Delivery 23"),
+        ("Customer Testimonials",        "2025-10-01", "2025-12-05", "Marketing",   "Identify advocates; Schedule interviews; Video production; Post-production; Distribution", "planned", "Sarah", "Delivery 24"),
+        ("Security Audit & Compliance",  "2025-10-13", "2025-12-19", "Engineering", "Third-party assessment; Vulnerability remediation; Penetration testing; SOC 2 prep; Certification", "planned", "Mike", "Delivery 25"),
     ]
 
     data_font = Font(name="Calibri", size=11)

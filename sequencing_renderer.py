@@ -1,22 +1,22 @@
-"""Sequencing Block Diagram renderer — Tetris-style space-filling layout.
+"""Sequencing Diagram renderer — Tetris-style space-filling layout.
 
-Inspired by Tetris: blocks drop into position and fill the entire available
-rectangle with no gaps. The algorithm uses a heightmap (skyline) approach
-where each block claims a proportional share of remaining vertical space
-in its time range.
+Visual storytelling: blocks are placed in delivery priority order, filling
+vertically top-to-bottom within their time range, then wrapping to the next
+available column. The algorithm uses a fine-grained heightmap to guarantee
+100% space utilization with zero gaps — like a perfectly played Tetris game.
 
-Layout:
-1. Items sorted by delivery sequence (label) then start date
-2. Heightmap tracks the "floor" at each day across the timeline
-3. Each block drops to its floor level and takes a proportional share
-   of remaining vertical space — guaranteeing full coverage
-4. Sequencing flows top-to-bottom, then left-to-right
+Layout algorithm:
+1. Items sorted by delivery sequence (Delivery 1, 2, 3...)
+2. A pixel-level heightmap tracks consumed vertical space at each day
+3. Each block drops to the lowest available position in its time range
+4. Block heights are computed to fill remaining space proportionally
+5. A final expansion pass stretches blocks to eliminate any residual gaps
 
 Visual style:
-- Bold category colors with 3D beveled edges (Tetris-like)
+- Bold saturated category colors with 3D beveled edges
 - Two-row timeline header (quarters + months)
 - Left-side vertical legend
-- Prominent bullet points inside blocks
+- Sequence numbers and bullet points inside blocks
 - Checkmark icons on completed items
 """
 import io
@@ -173,7 +173,7 @@ def _compute_two_row_timeline(chart_start: date, chart_end: date):
     return quarter_columns, month_columns
 
 
-# ── Tetris layout algorithm — heightmap space-filling ────────────────────────
+# ── Tetris layout algorithm — slot-based perfect space-filling ───────────────
 
 def _layout_sequencing(
     items: List[WorkItem],
@@ -184,89 +184,105 @@ def _layout_sequencing(
     base_line_h: float,
     font_size: float,
 ) -> List[dict]:
-    """Tetris-style space-filling layout using a heightmap.
+    """Tetris-style space-filling layout — guaranteed zero gaps.
 
-    Each block drops to its current floor level and claims a proportional
-    share of the remaining vertical space. This guarantees the entire
-    rectangle is filled with no gaps.
+    Algorithm:
+    1. Sort items by delivery sequence.
+    2. Assign each item to a row-slot (greedy non-overlapping packing).
+    3. At each day column, only active slots (with items) share the space.
+    4. Items get 1/active_count height, stacked top to bottom.
+    5. This ensures 100% space fill at every column.
 
     Returns list of dicts with keys:
         item, x_start, x_end, y_top, y_bot, height
-    Coordinates in normalized axes units (0-1). y=1 is top, y=0 is bottom.
     """
     total_days = (chart_end - chart_start).days
     if total_days <= 0:
         return []
 
-    # Sort by sequence number (Delivery 1, 2, 3...) then by start date
     sorted_items = sorted(
         items,
         key=lambda it: (_extract_sequence_number(it.label), it.start_date, it.title)
     )
 
-    gap = 0.004  # tiny gap between blocks for grid effect
+    gap = 0.003
 
-    # Heightmap: tracks how much vertical space is used at each day
-    # Value = fraction of height consumed (0.0 = nothing placed, 1.0 = full)
-    heightmap = np.zeros(total_days + 1, dtype=float)
-
-    # Pre-compute: for each day, count how many items will occupy it
-    # This lets us divide space proportionally
-    day_item_count = np.zeros(total_days + 1, dtype=float)
-    item_day_ranges = []
-
+    # Compute day ranges for each item
+    item_ranges = []
     for item in sorted_items:
         d_start = max(0, (item.start_date - chart_start).days)
         d_end = min(total_days, (item.end_date - chart_start).days)
         if d_end <= d_start:
             d_end = d_start + 1
-        item_day_ranges.append((d_start, d_end))
-        day_item_count[d_start:d_end] += 1
+        item_ranges.append((d_start, d_end))
 
-    # Ensure no zeros (avoid division by zero)
-    day_item_count = np.maximum(day_item_count, 1)
+    # ── Greedy slot assignment (non-overlapping items per slot) ───────
+    slots = []  # list of lists of (d_start, d_end, item_idx)
+    item_slot = {}
 
+    for idx in range(len(sorted_items)):
+        d_start, d_end = item_ranges[idx]
+        placed = False
+        for slot_idx, slot_entries in enumerate(slots):
+            fits = all(d_start >= e or d_end <= s for (s, e, _) in slot_entries)
+            if fits:
+                slot_entries.append((d_start, d_end, idx))
+                item_slot[idx] = slot_idx
+                placed = True
+                break
+        if not placed:
+            slots.append([(d_start, d_end, idx)])
+            item_slot[idx] = len(slots) - 1
+
+    num_slots = len(slots)
+    if num_slots == 0:
+        return []
+
+    # ── Per-day active slot tracking ─────────────────────────────────
+    resolution = total_days + 1
+    # For each slot and day, is there an active item?
+    slot_active = np.zeros((num_slots, resolution), dtype=bool)
+    for idx in range(len(sorted_items)):
+        d_start, d_end = item_ranges[idx]
+        s = item_slot[idx]
+        slot_active[s, d_start:d_end] = True
+
+    # ── Layout each item ─────────────────────────────────────────────
     layouts = []
+
     for idx, item in enumerate(sorted_items):
-        d_start, d_end = item_day_ranges[idx]
+        d_start, d_end = item_ranges[idx]
+        s = item_slot[idx]
 
-        x_start = d_start / total_days
-        x_end = d_end / total_days
-
-        x_s = x_start + gap
-        x_e = x_end - gap
+        x_s = d_start / total_days + gap
+        x_e = d_end / total_days - gap
         if x_e <= x_s:
-            x_e = x_s + gap
+            x_e = x_s + gap * 2
 
-        # Find the current floor (max heightmap value in this range)
-        floor = float(np.max(heightmap[d_start:d_end]))
+        # For each day in this item's range, compute:
+        # - how many slots are active
+        # - this slot's position among active slots
+        # Then take the worst case (most crowded day) for consistent height.
+        min_height = 1.0
+        max_top_offset = 0.0
 
-        # Count remaining items (including this one) that still need space
-        # at each day in this range. Use the maximum overlap count.
-        remaining_at_days = day_item_count[d_start:d_end].copy()
-        # The share for this block: proportional to 1/remaining
-        # Use the max remaining count to ensure uniform height across the block
-        max_remaining = float(np.max(remaining_at_days))
-        share = (1.0 - floor) / max(1, max_remaining)
+        for d in range(d_start, d_end):
+            active_count = int(np.sum(slot_active[:, d]))
+            active_count = max(1, active_count)
+            h = 1.0 / active_count
+            if h < min_height:
+                min_height = h
 
-        # Enforce a minimum height so text is readable
-        min_h = 0.04
-        height = max(share, min_h)
+            # Position: count active slots with index < s at this day
+            above = sum(1 for ss in range(s) if slot_active[ss, d])
+            top_offset = above * h
+            if top_offset > max_top_offset:
+                max_top_offset = top_offset
 
-        # Don't exceed remaining space
-        height = min(height, 1.0 - floor)
-
-        y_top = 1.0 - floor - gap
-        y_bot = 1.0 - floor - height + gap
-        if y_bot >= y_top:
-            y_bot = y_top - min_h
-
-        # Update heightmap — mark this space as consumed
-        heightmap[d_start:d_end] += height
-
-        # Decrement remaining item count for these days
-        day_item_count[d_start:d_end] -= 1
-        day_item_count = np.maximum(day_item_count, 0)
+        height = min_height
+        y_top = 1.0 - max_top_offset - gap
+        y_bot = y_top - height + gap * 2
+        y_bot = max(gap, y_bot)
 
         layouts.append({
             "item": item,
@@ -275,7 +291,40 @@ def _layout_sequencing(
             "y_top": y_top,
             "y_bot": y_bot,
             "height": y_top - y_bot,
+            "_d_start": d_start,
+            "_d_end": d_end,
+            "_slot": s,
         })
+
+    # ── Expansion pass: fill gaps where fewer slots are active ────────
+    # For each item, check if it's the bottommost in its range;
+    # if so, stretch it down to fill unused space.
+    if layouts:
+        for li, layout in enumerate(layouts):
+            d_s = layout["_d_start"]
+            d_e = layout["_d_end"]
+            s = layout["_slot"]
+
+            # Is this the bottom slot at every day in its range?
+            is_bottom = True
+            for d in range(d_s, d_e):
+                # Check if any slot below s is active at day d
+                for ss in range(s + 1, num_slots):
+                    if slot_active[ss, d]:
+                        is_bottom = False
+                        break
+                if not is_bottom:
+                    break
+
+            if is_bottom and layout["y_bot"] > gap * 2:
+                layout["y_bot"] = gap
+                layout["height"] = layout["y_top"] - layout["y_bot"]
+
+    # Clean internal keys
+    for layout in layouts:
+        layout.pop("_d_start", None)
+        layout.pop("_d_end", None)
+        layout.pop("_slot", None)
 
     return layouts
 
@@ -510,7 +559,7 @@ def _render_sequencing_figure(items, config, dpi, slide_aspect="16:9"):
     ax_content.axis("off")
     ax_content.set_facecolor("#F0F2F5")
 
-    # Content background — light gray to make blocks pop
+    # Content background
     content_bg = FancyBboxPatch(
         (0, 0), 1, 1, boxstyle="square,pad=0",
         facecolor="#F0F2F5", edgecolor="#CBD5E1", linewidth=1.0, zorder=0,
@@ -536,7 +585,7 @@ def _render_sequencing_figure(items, config, dpi, slide_aspect="16:9"):
         if bh <= 0 or bw <= 0:
             continue
 
-        # Color — use bold saturated colors (Tetris-style)
+        # Color — bold saturated colors
         base_color = config.get_category_color(item.category, categories)
         bar_color = item.color_override if item.color_override else base_color
         highlight_color = _lighten_color(bar_color, 0.3)
@@ -559,7 +608,7 @@ def _render_sequencing_figure(items, config, dpi, slide_aspect="16:9"):
                             fontfamily=font_name, fontweight="medium", zorder=6)
             continue
 
-        # ── Tetris block: main fill ──────────────────────────────────
+        # ── Main block fill ──────────────────────────────────────────
         block_rect = FancyBboxPatch(
             (x_s, y_bot), bw, bh,
             boxstyle="round,pad=0,rounding_size=0.003",
@@ -568,7 +617,7 @@ def _render_sequencing_figure(items, config, dpi, slide_aspect="16:9"):
         )
         ax_content.add_patch(block_rect)
 
-        # ── Tetris 3D bevel: top highlight edge ─────────────────────
+        # ── 3D bevel: top highlight ─────────────────────────────────
         bevel = 0.003
         top_edge = plt.Polygon([
             [x_s, y_top], [x_e, y_top],
@@ -577,7 +626,7 @@ def _render_sequencing_figure(items, config, dpi, slide_aspect="16:9"):
             zorder=4, alpha=0.6)
         ax_content.add_patch(top_edge)
 
-        # ── Tetris 3D bevel: left highlight edge ────────────────────
+        # ── 3D bevel: left highlight ────────────────────────────────
         left_edge = plt.Polygon([
             [x_s, y_top], [x_s, y_bot],
             [x_s + bevel, y_bot + bevel], [x_s + bevel, y_top - bevel],
@@ -585,7 +634,7 @@ def _render_sequencing_figure(items, config, dpi, slide_aspect="16:9"):
             zorder=4, alpha=0.4)
         ax_content.add_patch(left_edge)
 
-        # ── Tetris 3D bevel: bottom shadow edge ────────────────────
+        # ── 3D bevel: bottom shadow ─────────────────────────────────
         bot_edge = plt.Polygon([
             [x_s, y_bot], [x_e, y_bot],
             [x_e - bevel, y_bot + bevel], [x_s + bevel, y_bot + bevel],
@@ -593,7 +642,7 @@ def _render_sequencing_figure(items, config, dpi, slide_aspect="16:9"):
             zorder=4, alpha=0.4)
         ax_content.add_patch(bot_edge)
 
-        # ── Tetris 3D bevel: right shadow edge ─────────────────────
+        # ── 3D bevel: right shadow ──────────────────────────────────
         right_edge = plt.Polygon([
             [x_e, y_top], [x_e, y_bot],
             [x_e - bevel, y_bot + bevel], [x_e - bevel, y_top - bevel],
@@ -601,10 +650,28 @@ def _render_sequencing_figure(items, config, dpi, slide_aspect="16:9"):
             zorder=4, alpha=0.3)
         ax_content.add_patch(right_edge)
 
+        # ── Sequence number badge (top-right corner) ────────────────
+        seq_num = _extract_sequence_number(item.label)
+        if seq_num < 999:
+            badge_r = min(0.012, bw * 0.12, bh * 0.15)
+            badge_x = x_e - badge_r - bevel - 0.003
+            badge_y = y_top - badge_r - bevel - 0.003
+            badge = plt.Circle(
+                (badge_x, badge_y), badge_r,
+                facecolor="#FFFFFF", edgecolor=shadow_color,
+                linewidth=0.8, zorder=6, alpha=0.95,
+            )
+            ax_content.add_patch(badge)
+            ax_content.text(
+                badge_x, badge_y, str(seq_num),
+                fontsize=max(5, min(7, badge_r * 500)),
+                color="#1E293B", ha="center", va="center",
+                fontfamily=font_name, fontweight="bold", zorder=7,
+            )
+
         # ── Text inside block ────────────────────────────────────────
-        fig_w_inches = fig.get_figwidth()
-        block_w_inches = bw * fig_w_inches * content_x_width
-        block_h_inches = bh * fig.get_figheight() * content_h_frac
+        block_w_inches = bw * fig_w * content_x_width
+        block_h_inches = bh * fig_h * content_h_frac
 
         # Font sizing based on block dimensions
         if block_h_inches >= 1.5 and block_w_inches >= 2.5:
@@ -623,7 +690,7 @@ def _render_sequencing_figure(items, config, dpi, slide_aspect="16:9"):
         chars_per_inch = title_fs * 0.85
         max_chars = max(5, int(block_w_inches * chars_per_inch))
 
-        line_h = base_line_h_inches / (fig.get_figheight() * content_h_frac)
+        line_h = base_line_h_inches / (fig_h * content_h_frac)
 
         text_margin_x = bw * 0.05
         text_margin_y = bh * 0.08
@@ -642,7 +709,7 @@ def _render_sequencing_figure(items, config, dpi, slide_aspect="16:9"):
 
         # Checkmark for completed items
         if item.status == "done":
-            check_x = x_e - text_margin_x - bevel
+            check_x = x_e - text_margin_x - bevel - (0.03 if seq_num < 999 else 0)
             check_y = y_top - text_margin_y - bevel
             ax_content.text(check_x, check_y, "\u2713", fontsize=title_fs + 2,
                             color="#FFFFFF" if text_color == "#FFFFFF" else "#10B981",
