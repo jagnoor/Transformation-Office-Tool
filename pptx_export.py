@@ -651,17 +651,44 @@ def export_sequencing_pptx(items: List[WorkItem], config: ChartConfig) -> bytes:
         y_top_frac = layout["y_top"]
         y_bot_frac = layout["y_bot"]
 
-        left = int(content_left + content_w * x_s)
-        width = max(int(content_w * (x_e - x_s)), Inches(0.2))
-        top = int(content_top_y + content_h * (1.0 - y_top_frac))
-        height = max(int(content_h * (y_top_frac - y_bot_frac)), Inches(0.3))
-
         bar_color = config.get_category_color(item.category, categories)
         if item.color_override:
             bar_color = item.color_override
         fill_color = _lighten_color(bar_color, 0.55)
         txt_color = _text_color_for_bg(fill_color)
         border = _darken_color(bar_color, 0.1)
+
+        # Draw all segment rectangles for this item
+        rects = layout.get("rects", [])
+        for rect in rects:
+            rx_s = rect["x_start"]
+            rx_e = rect["x_end"]
+            ry_top = rect["y_top"]
+            ry_bot = rect["y_bot"]
+            r_left = int(content_left + content_w * rx_s)
+            r_width = max(int(content_w * (rx_e - rx_s)), Inches(0.1))
+            r_top = int(content_top_y + content_h * (1.0 - ry_top))
+            r_height = max(int(content_h * (ry_top - ry_bot)), Inches(0.1))
+
+            # Skip if this is the primary rect (drawn below with text)
+            if (abs(rx_s - x_s) < 0.002 and abs(rx_e - x_e) < 0.002 and
+                abs(ry_top - y_top_frac) < 0.002):
+                continue
+
+            extra_shape = slide.shapes.add_shape(
+                MSO_SHAPE.ROUNDED_RECTANGLE,
+                r_left, r_top, r_width, r_height,
+            )
+            extra_shape.fill.solid()
+            extra_shape.fill.fore_color.rgb = _hex_to_rgb(fill_color)
+            extra_shape.line.color.rgb = _hex_to_rgb(border)
+            extra_shape.line.width = Pt(0.5)
+
+        # Primary rectangle with text
+        left = int(content_left + content_w * x_s)
+        width = max(int(content_w * (x_e - x_s)), Inches(0.2))
+        top = int(content_top_y + content_h * (1.0 - y_top_frac))
+        height = max(int(content_h * (y_top_frac - y_bot_frac)), Inches(0.3))
 
         if item.is_milestone:
             mid_x = left + width // 2
