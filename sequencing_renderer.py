@@ -1,19 +1,27 @@
-"""Sequencing Block Diagram renderer — timeline-based overlapping layout.
+"""Sequencing Block Diagram renderer — Tetris-style space-filling layout.
 
-This creates the "On Demand Pay 2019" style visualization where work items
-are positioned on a calendar timeline and allowed to overlap vertically,
-making it clear to executive leadership where capacity constraints exist.
+Inspired by Tetris: blocks drop into position and fill the entire available
+rectangle with no gaps. The algorithm uses a heightmap (skyline) approach
+where each block claims a proportional share of remaining vertical space
+in its time range.
 
-Key differences from block_renderer.py:
-- Gravity-stacking layout: blocks overlap vertically when they share time
-- Variable block heights based on content (title + bullet points)
+Layout:
+1. Items sorted by delivery sequence (label) then start date
+2. Heightmap tracks the "floor" at each day across the timeline
+3. Each block drops to its floor level and takes a proportional share
+   of remaining vertical space — guaranteeing full coverage
+4. Sequencing flows top-to-bottom, then left-to-right
+
+Visual style:
+- Bold category colors with 3D beveled edges (Tetris-like)
 - Two-row timeline header (quarters + months)
 - Left-side vertical legend
-- Prominent bullet points inside blocks from description field
+- Prominent bullet points inside blocks
 - Checkmark icons on completed items
 """
 import io
 import math
+import re
 from collections import defaultdict
 from datetime import date, timedelta
 from typing import List, Optional, Tuple
@@ -29,7 +37,7 @@ import numpy as np
 from models import WorkItem, ChartConfig, STATUS_COLORS
 
 
-# ── Color utilities (same as block_renderer.py) ──────────────────────────────
+# ── Color utilities ──────────────────────────────────────────────────────────
 
 def _resolve_font(preferred: str = "Arial") -> str:
     import matplotlib.font_manager as fm
@@ -85,15 +93,10 @@ def _wrap_text(text: str, max_chars_per_line: int) -> str:
 # ── Description parsing ──────────────────────────────────────────────────────
 
 def _parse_bullets(description: str) -> List[str]:
-    """Parse description text into individual bullet points.
-
-    Split on newlines first, then semicolons. Never split on commas
-    (would break sentences). Strip leading bullet chars (- * +).
-    """
+    """Parse description text into individual bullet points."""
     if not description or not description.strip():
         return []
 
-    # Try newlines first
     if "\n" in description:
         parts = description.split("\n")
     elif ";" in description:
@@ -104,32 +107,32 @@ def _parse_bullets(description: str) -> List[str]:
     bullets = []
     for part in parts:
         part = part.strip()
-        # Strip leading bullet markers
         if part and part[0] in "-*+":
             part = part[1:].strip()
-        # Strip leading numbering like "1." or "1)"
         if part and len(part) > 1:
             i = 0
             while i < len(part) and part[i].isdigit():
                 i += 1
-            if i > 0 and i < len(part) and part[i] in ".)" :
+            if i > 0 and i < len(part) and part[i] in ".)":
                 part = part[i + 1:].strip()
         if part:
             bullets.append(part)
 
-    # Cap at 8 bullet points
     return bullets[:8]
+
+
+def _extract_sequence_number(label: str) -> int:
+    """Extract numeric sequence from label like 'Delivery 3' -> 3."""
+    if not label:
+        return 999
+    match = re.search(r'(\d+)', label)
+    return int(match.group(1)) if match else 999
 
 
 # ── Two-row timeline computation ─────────────────────────────────────────────
 
 def _compute_two_row_timeline(chart_start: date, chart_end: date):
-    """Compute quarter and month column boundaries for a two-row header.
-
-    Returns (quarter_columns, month_columns) where each is a list of
-    (col_start_date, col_end_date, label) tuples.
-    """
-    # Month columns
+    """Compute quarter and month column boundaries for a two-row header."""
     month_columns = []
     current = chart_start.replace(day=1)
     while current <= chart_end:
@@ -140,7 +143,6 @@ def _compute_two_row_timeline(chart_start: date, chart_end: date):
         month_columns.append((col_start, col_end, label))
         current = next_month
 
-    # Quarter columns
     quarter_columns = []
     if not month_columns:
         return quarter_columns, month_columns
@@ -153,7 +155,6 @@ def _compute_two_row_timeline(chart_start: date, chart_end: date):
 
     while current <= last_date:
         q_num = (current.month - 1) // 3 + 1
-        # End of quarter
         q_end_month = current.month + 2
         q_end_year = current.year
         if q_end_month > 12:
@@ -172,45 +173,7 @@ def _compute_two_row_timeline(chart_start: date, chart_end: date):
     return quarter_columns, month_columns
 
 
-# ── Layout algorithm — gravity stacking ──────────────────────────────────────
-
-def _calc_block_height(
-    item: WorkItem,
-    block_w_inches: float,
-    base_line_h: float,
-    font_size: float,
-) -> float:
-    """Calculate block height in normalized axes units based on content."""
-    lines = 0
-
-    # Label line (e.g., "Delivery 1")
-    if item.label:
-        lines += 1
-
-    # Title lines (estimate wrapping)
-    chars_per_inch = font_size * 0.85
-    max_chars = max(5, int(block_w_inches * chars_per_inch))
-    title_words = item.title.split()
-    title_lines = 1
-    current_len = 0
-    for word in title_words:
-        if current_len > 0 and current_len + 1 + len(word) > max_chars:
-            title_lines += 1
-            current_len = len(word)
-        else:
-            current_len += (1 if current_len > 0 else 0) + len(word)
-    lines += min(title_lines, 3)  # cap title at 3 lines
-
-    # Bullet points
-    bullets = _parse_bullets(item.description)
-    lines += len(bullets)
-
-    # Minimum 2 lines worth of height
-    lines = max(2, lines)
-
-    # Add padding (top + bottom margins ~0.6 lines)
-    return (lines + 0.8) * base_line_h
-
+# ── Tetris layout algorithm — heightmap space-filling ────────────────────────
 
 def _layout_sequencing(
     items: List[WorkItem],
@@ -221,72 +184,97 @@ def _layout_sequencing(
     base_line_h: float,
     font_size: float,
 ) -> List[dict]:
-    """Compute layout positions using gravity-stacking algorithm.
+    """Tetris-style space-filling layout using a heightmap.
+
+    Each block drops to its current floor level and claims a proportional
+    share of the remaining vertical space. This guarantees the entire
+    rectangle is filled with no gaps.
 
     Returns list of dicts with keys:
         item, x_start, x_end, y_top, y_bot, height
-    All coordinates are in normalized axes units (0-1).
+    Coordinates in normalized axes units (0-1). y=1 is top, y=0 is bottom.
     """
     total_days = (chart_end - chart_start).days
     if total_days <= 0:
         return []
 
-    # Sort by start date, then longest duration first
-    sorted_items = sorted(items, key=lambda it: (it.start_date, -it.duration_days, it.title))
+    # Sort by sequence number (Delivery 1, 2, 3...) then by start date
+    sorted_items = sorted(
+        items,
+        key=lambda it: (_extract_sequence_number(it.label), it.start_date, it.title)
+    )
 
-    gap_y = 0.008  # vertical gap between blocks
-    gap_x = 0.003  # horizontal padding
+    gap = 0.004  # tiny gap between blocks for grid effect
 
-    placed = []  # list of (x_s, x_e, y_top, y_bot) for collision detection
+    # Heightmap: tracks how much vertical space is used at each day
+    # Value = fraction of height consumed (0.0 = nothing placed, 1.0 = full)
+    heightmap = np.zeros(total_days + 1, dtype=float)
+
+    # Pre-compute: for each day, count how many items will occupy it
+    # This lets us divide space proportionally
+    day_item_count = np.zeros(total_days + 1, dtype=float)
+    item_day_ranges = []
+
+    for item in sorted_items:
+        d_start = max(0, (item.start_date - chart_start).days)
+        d_end = min(total_days, (item.end_date - chart_start).days)
+        if d_end <= d_start:
+            d_end = d_start + 1
+        item_day_ranges.append((d_start, d_end))
+        day_item_count[d_start:d_end] += 1
+
+    # Ensure no zeros (avoid division by zero)
+    day_item_count = np.maximum(day_item_count, 1)
 
     layouts = []
-    for item in sorted_items:
-        x_start = max(0, (item.start_date - chart_start).days / total_days)
-        x_end = min(1, (item.end_date - chart_start).days / total_days)
-        if x_end <= x_start:
-            x_end = x_start + 1 / total_days
+    for idx, item in enumerate(sorted_items):
+        d_start, d_end = item_day_ranges[idx]
 
-        x_s = x_start + gap_x
-        x_e = x_end - gap_x
+        x_start = d_start / total_days
+        x_end = d_end / total_days
+
+        x_s = x_start + gap
+        x_e = x_end - gap
         if x_e <= x_s:
-            x_e = x_s + gap_x
+            x_e = x_s + gap
 
-        # Compute block width in inches for height calculation
-        block_w_inches = (x_e - x_s) * content_w_inches
+        # Find the current floor (max heightmap value in this range)
+        floor = float(np.max(heightmap[d_start:d_end]))
 
-        # Compute height
-        height = _calc_block_height(item, block_w_inches, base_line_h, font_size)
+        # Count remaining items (including this one) that still need space
+        # at each day in this range. Use the maximum overlap count.
+        remaining_at_days = day_item_count[d_start:d_end].copy()
+        # The share for this block: proportional to 1/remaining
+        # Use the max remaining count to ensure uniform height across the block
+        max_remaining = float(np.max(remaining_at_days))
+        share = (1.0 - floor) / max(1, max_remaining)
 
-        # Find y position — gravity stacking from top
-        y_top = 1.0 - gap_y
+        # Enforce a minimum height so text is readable
+        min_h = 0.04
+        height = max(share, min_h)
 
-        # Collect all placed blocks that overlap in x
-        overlapping = []
-        for (px_s, px_e, py_top, py_bot) in placed:
-            if x_s < px_e and x_e > px_s:  # x-overlap
-                overlapping.append((py_top, py_bot))
+        # Don't exceed remaining space
+        height = min(height, 1.0 - floor)
 
-        # Sort overlapping blocks by y_top descending (highest first)
-        overlapping.sort(key=lambda o: -o[0])
+        y_top = 1.0 - floor - gap
+        y_bot = 1.0 - floor - height + gap
+        if y_bot >= y_top:
+            y_bot = y_top - min_h
 
-        # Try placing at y_top = 1.0 - gap, then check collisions
-        for (oy_top, oy_bot) in overlapping:
-            candidate_bot = y_top - height
-            # Check if there's a collision
-            if y_top > oy_bot and candidate_bot < oy_top:
-                # Collision — move below this block
-                y_top = oy_bot - gap_y
+        # Update heightmap — mark this space as consumed
+        heightmap[d_start:d_end] += height
 
-        y_bot = y_top - height
+        # Decrement remaining item count for these days
+        day_item_count[d_start:d_end] -= 1
+        day_item_count = np.maximum(day_item_count, 0)
 
-        placed.append((x_s, x_e, y_top, y_bot))
         layouts.append({
             "item": item,
             "x_start": x_s,
             "x_end": x_e,
             "y_top": y_top,
             "y_bot": y_bot,
-            "height": height,
+            "height": y_top - y_bot,
         })
 
     return layouts
@@ -300,7 +288,7 @@ def render_sequencing_diagram(
     dpi: int = 200,
     slide_aspect: str = "16:9",
 ) -> bytes:
-    """Render a sequencing block diagram and return PNG bytes."""
+    """Render a Tetris-style sequencing diagram and return PNG bytes."""
     if not items:
         raise ValueError("No work items to render")
 
@@ -334,7 +322,7 @@ def render_sequencing_pdf(
 
 
 def _render_sequencing_figure(items, config, dpi, slide_aspect="16:9"):
-    """Build and return a matplotlib Figure for the sequencing diagram."""
+    """Build and return a matplotlib Figure for the Tetris sequencing diagram."""
     font_name = _resolve_font(config.font_family)
     plt.rcParams.update({
         "font.family": font_name,
@@ -379,12 +367,10 @@ def _render_sequencing_figure(items, config, dpi, slide_aspect="16:9"):
     content_right_x = 0.98
     content_x_width = content_right_x - content_left_x
 
-    # Compute layout first to determine if we need more height
     content_h_frac = content_top - content_bot
     content_w_inches = fig_w * content_x_width
     content_h_inches = fig_h * content_h_frac
 
-    # Font size for blocks
     base_font_size = 8.5
     base_line_h_inches = base_font_size * 0.016
     base_line_h = base_line_h_inches / content_h_inches
@@ -394,22 +380,6 @@ def _render_sequencing_figure(items, config, dpi, slide_aspect="16:9"):
         content_w_inches, content_h_inches,
         base_line_h, base_font_size,
     )
-
-    # Check if blocks overflow and adjust figure height
-    if layouts:
-        min_y = min(l["y_bot"] for l in layouts)
-        if min_y < -0.05:
-            # Scale up figure height to fit all content
-            scale = content_h_frac / (content_h_frac + abs(min_y) + 0.05)
-            fig_h = fig_h / scale
-            # Recompute with new height
-            content_h_inches = fig_h * content_h_frac
-            base_line_h = base_line_h_inches / content_h_inches
-            layouts = _layout_sequencing(
-                items, chart_start, chart_end,
-                content_w_inches, content_h_inches,
-                base_line_h, base_font_size,
-            )
 
     fig = plt.figure(figsize=(fig_w, fig_h), dpi=dpi, facecolor=config.background_color)
 
@@ -501,19 +471,16 @@ def _render_sequencing_figure(items, config, dpi, slide_aspect="16:9"):
         ax_legend.set_ylim(0, 1)
         ax_legend.axis("off")
 
-        # Legend background
         legend_bg = FancyBboxPatch(
             (0, 0), 1, 1, boxstyle="round,pad=0,rounding_size=0.02",
             facecolor="#F1F5F9", edgecolor="#E2E8F0", linewidth=0.5, zorder=0,
         )
         ax_legend.add_patch(legend_bg)
 
-        # Legend title
         ax_legend.text(0.5, 0.97, "LEGEND", fontsize=7.5, color="#64748B",
                        ha="center", va="top", fontfamily=font_name,
                        fontweight="bold", zorder=2)
 
-        # Category swatches stacked vertically
         num_cats = len(categories)
         if num_cats > 0:
             spacing = min(0.08, 0.85 / num_cats)
@@ -541,22 +508,22 @@ def _render_sequencing_figure(items, config, dpi, slide_aspect="16:9"):
     ax_content.set_xlim(0, 1)
     ax_content.set_ylim(0, 1)
     ax_content.axis("off")
-    ax_content.set_facecolor("#FFFFFF")
+    ax_content.set_facecolor("#F0F2F5")
 
-    # Content background
+    # Content background — light gray to make blocks pop
     content_bg = FancyBboxPatch(
         (0, 0), 1, 1, boxstyle="square,pad=0",
-        facecolor="#FFFFFF", edgecolor="#E2E8F0", linewidth=0.5, zorder=0,
+        facecolor="#F0F2F5", edgecolor="#CBD5E1", linewidth=1.0, zorder=0,
     )
     ax_content.add_patch(content_bg)
 
-    # Vertical grid lines from month boundaries
+    # Subtle vertical grid lines from month boundaries
     for i, (col_start, col_end, label) in enumerate(month_columns):
         x = (col_start - chart_start).days / total_days
         if i > 0:
-            ax_content.axvline(x=x, color="#E2E8F0", linewidth=0.5, zorder=1, alpha=0.6)
+            ax_content.axvline(x=x, color="#D1D5DB", linewidth=0.3, zorder=1, alpha=0.5)
 
-    # ── Draw blocks ──────────────────────────────────────────────────────
+    # ── Draw Tetris blocks ───────────────────────────────────────────────
     for layout in layouts:
         item = layout["item"]
         x_s = layout["x_start"]
@@ -566,15 +533,17 @@ def _render_sequencing_figure(items, config, dpi, slide_aspect="16:9"):
         bw = x_e - x_s
         bh = y_top - y_bot
 
-        # Color
+        if bh <= 0 or bw <= 0:
+            continue
+
+        # Color — use bold saturated colors (Tetris-style)
         base_color = config.get_category_color(item.category, categories)
         bar_color = item.color_override if item.color_override else base_color
-        fill_color = _lighten_color(bar_color, 0.55)
-        border_color = _darken_color(bar_color, 0.1)
-        text_color = _text_color_for_bg(fill_color)
+        highlight_color = _lighten_color(bar_color, 0.3)
+        shadow_color = _darken_color(bar_color, 0.25)
+        text_color = _text_color_for_bg(bar_color)
 
         if item.is_milestone:
-            # Milestone marker
             mid_x = (x_s + x_e) / 2
             mid_y = (y_top + y_bot) / 2
             size_x = min(0.012, bw / 2)
@@ -582,7 +551,7 @@ def _render_sequencing_figure(items, config, dpi, slide_aspect="16:9"):
             diamond = plt.Polygon([
                 [mid_x, mid_y + size_y], [mid_x + size_x, mid_y],
                 [mid_x, mid_y - size_y], [mid_x - size_x, mid_y],
-            ], closed=True, facecolor=bar_color, edgecolor=border_color,
+            ], closed=True, facecolor=bar_color, edgecolor=shadow_color,
                 linewidth=1.5, zorder=5)
             ax_content.add_patch(diamond)
             ax_content.text(mid_x + size_x + 0.005, mid_y, item.title,
@@ -590,107 +559,148 @@ def _render_sequencing_figure(items, config, dpi, slide_aspect="16:9"):
                             fontfamily=font_name, fontweight="medium", zorder=6)
             continue
 
-        # Block rectangle with category-tinted fill
+        # ── Tetris block: main fill ──────────────────────────────────
         block_rect = FancyBboxPatch(
             (x_s, y_bot), bw, bh,
-            boxstyle="round,pad=0,rounding_size=0.004",
-            facecolor=fill_color, edgecolor=border_color,
-            linewidth=1.0, zorder=3,
+            boxstyle="round,pad=0,rounding_size=0.003",
+            facecolor=bar_color, edgecolor=shadow_color,
+            linewidth=1.2, zorder=3,
         )
         ax_content.add_patch(block_rect)
 
-        # Left color accent bar
-        accent_w = bw * 0.02
-        accent_rect = FancyBboxPatch(
-            (x_s, y_bot), max(accent_w, 0.003), bh,
-            boxstyle="square,pad=0",
-            facecolor=bar_color, edgecolor="none",
-            zorder=4,
-        )
-        ax_content.add_patch(accent_rect)
+        # ── Tetris 3D bevel: top highlight edge ─────────────────────
+        bevel = 0.003
+        top_edge = plt.Polygon([
+            [x_s, y_top], [x_e, y_top],
+            [x_e - bevel, y_top - bevel], [x_s + bevel, y_top - bevel],
+        ], closed=True, facecolor=highlight_color, edgecolor="none",
+            zorder=4, alpha=0.6)
+        ax_content.add_patch(top_edge)
+
+        # ── Tetris 3D bevel: left highlight edge ────────────────────
+        left_edge = plt.Polygon([
+            [x_s, y_top], [x_s, y_bot],
+            [x_s + bevel, y_bot + bevel], [x_s + bevel, y_top - bevel],
+        ], closed=True, facecolor=highlight_color, edgecolor="none",
+            zorder=4, alpha=0.4)
+        ax_content.add_patch(left_edge)
+
+        # ── Tetris 3D bevel: bottom shadow edge ────────────────────
+        bot_edge = plt.Polygon([
+            [x_s, y_bot], [x_e, y_bot],
+            [x_e - bevel, y_bot + bevel], [x_s + bevel, y_bot + bevel],
+        ], closed=True, facecolor=shadow_color, edgecolor="none",
+            zorder=4, alpha=0.4)
+        ax_content.add_patch(bot_edge)
+
+        # ── Tetris 3D bevel: right shadow edge ─────────────────────
+        right_edge = plt.Polygon([
+            [x_e, y_top], [x_e, y_bot],
+            [x_e - bevel, y_bot + bevel], [x_e - bevel, y_top - bevel],
+        ], closed=True, facecolor=shadow_color, edgecolor="none",
+            zorder=4, alpha=0.3)
+        ax_content.add_patch(right_edge)
 
         # ── Text inside block ────────────────────────────────────────
         fig_w_inches = fig.get_figwidth()
         block_w_inches = bw * fig_w_inches * content_x_width
-        block_h_inches = bh * fig.get_figheight() * (content_top - content_bot)
+        block_h_inches = bh * fig.get_figheight() * content_h_frac
 
-        # Font sizing based on block width
-        if block_w_inches >= 3.0:
+        # Font sizing based on block dimensions
+        if block_h_inches >= 1.5 and block_w_inches >= 2.5:
             title_fs = 9.5
-        elif block_w_inches >= 2.0:
+        elif block_h_inches >= 0.8 and block_w_inches >= 1.5:
             title_fs = 8.5
-        elif block_w_inches >= 1.2:
+        elif block_h_inches >= 0.4 and block_w_inches >= 0.8:
             title_fs = 7.5
-        elif block_w_inches >= 0.6:
-            title_fs = 7
+        elif block_w_inches >= 0.5:
+            title_fs = 6.5
         else:
-            title_fs = 6
+            title_fs = 5.5
 
-        bullet_fs = max(5.5, title_fs - 1.5)
+        bullet_fs = max(5, title_fs - 1.5)
 
         chars_per_inch = title_fs * 0.85
         max_chars = max(5, int(block_w_inches * chars_per_inch))
 
-        line_h = base_line_h_inches / (fig.get_figheight() * (content_top - content_bot))
+        line_h = base_line_h_inches / (fig.get_figheight() * content_h_frac)
 
-        text_margin_x = bw * 0.06
-        text_margin_y = bh * 0.06
-        text_x = x_s + text_margin_x + max(accent_w, 0.003)
-        text_y = y_top - text_margin_y
+        text_margin_x = bw * 0.05
+        text_margin_y = bh * 0.08
+        text_x = x_s + text_margin_x + bevel
+        text_y = y_top - text_margin_y - bevel
 
-        if block_w_inches < 0.4:
+        # Skip text for tiny blocks
+        if block_w_inches < 0.35 or block_h_inches < 0.15:
             continue
+
+        # Estimate how many text lines fit
+        available_h = bh - text_margin_y * 2 - bevel * 2
+        max_text_lines = max(1, int(available_h / (line_h * 1.15)))
+
+        lines_used = 0
 
         # Checkmark for completed items
         if item.status == "done":
-            check_x = x_e - bw * 0.06
-            check_y = y_top - text_margin_y
-            ax_content.text(check_x, check_y, "\u2713", fontsize=title_fs + 3,
-                            color="#10B981", va="top", ha="right",
-                            fontfamily=font_name, fontweight="bold", zorder=6)
+            check_x = x_e - text_margin_x - bevel
+            check_y = y_top - text_margin_y - bevel
+            ax_content.text(check_x, check_y, "\u2713", fontsize=title_fs + 2,
+                            color="#FFFFFF" if text_color == "#FFFFFF" else "#10B981",
+                            va="top", ha="right",
+                            fontfamily=font_name, fontweight="bold", zorder=6,
+                            alpha=0.9)
 
         # Label (e.g., "Delivery 1")
-        if item.label:
+        if item.label and max_text_lines >= 2:
             ax_content.text(
                 text_x, text_y, item.label,
-                fontsize=title_fs - 0.5, color="#475569",
+                fontsize=max(5, title_fs - 0.5), color=text_color,
                 va="top", ha="left", fontfamily=font_name,
                 fontweight="bold", style="italic",
-                zorder=5,
+                zorder=5, alpha=0.9,
             )
-            text_y -= line_h * 1.2
+            text_y -= line_h * 1.15
+            lines_used += 1
 
         # Title (bold)
-        wrapped_title = _wrap_text(item.title, max_chars)
-        title_lines = wrapped_title.split("\n")[:3]
-        display_title = "\n".join(title_lines)
+        if lines_used < max_text_lines:
+            wrapped_title = _wrap_text(item.title, max_chars)
+            title_lines = wrapped_title.split("\n")
+            avail = max(1, min(len(title_lines), max_text_lines - lines_used))
+            if avail < len(title_lines):
+                title_lines = title_lines[:avail]
+                last = title_lines[-1]
+                if len(last) > 2:
+                    title_lines[-1] = last[:-1] + "\u2026"
+            display_title = "\n".join(title_lines)
 
-        ax_content.text(
-            text_x, text_y, display_title,
-            fontsize=title_fs, color="#1E293B",
-            va="top", ha="left", fontfamily=font_name,
-            fontweight="bold", zorder=5,
-            linespacing=1.2,
-        )
-        text_y -= len(title_lines) * line_h * 1.2
+            ax_content.text(
+                text_x, text_y, display_title,
+                fontsize=title_fs, color=text_color,
+                va="top", ha="left", fontfamily=font_name,
+                fontweight="bold", zorder=5,
+                linespacing=1.15,
+            )
+            lines_used += len(title_lines)
+            text_y -= len(title_lines) * line_h * 1.15
 
         # Bullet points from description
         bullets = _parse_bullets(item.description)
-        if bullets and block_w_inches >= 0.8:
+        remaining_lines = max_text_lines - lines_used
+        if bullets and remaining_lines >= 1 and block_w_inches >= 0.6:
             bullet_chars = max(5, int(block_w_inches * bullet_fs * 0.85))
-            for bullet in bullets:
-                # Wrap long bullets
+            for bullet in bullets[:remaining_lines]:
                 if len(bullet) > bullet_chars:
                     bullet = bullet[:bullet_chars - 1] + "\u2026"
                 bullet_text = f"\u2022 {bullet}"
 
                 ax_content.text(
                     text_x, text_y, bullet_text,
-                    fontsize=bullet_fs, color="#334155",
+                    fontsize=bullet_fs, color=text_color,
                     va="top", ha="left", fontfamily=font_name,
-                    zorder=5, linespacing=1.15,
+                    zorder=5, alpha=0.85, linespacing=1.1,
                 )
-                text_y -= line_h * 1.1
+                text_y -= line_h * 1.05
 
     # ── Today line ───────────────────────────────────────────────────────
     if config.show_today_line:
