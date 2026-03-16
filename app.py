@@ -15,7 +15,8 @@ from models import WorkItem, ChartConfig, PALETTES, DEFAULT_PALETTE, STATUS_LABE
 from excel_io import read_excel, create_template_bytes
 from gantt_renderer import render_gantt, render_gantt_pdf
 from block_renderer import render_block_diagram, render_block_pdf
-from pptx_export import export_gantt_pptx, export_block_pptx
+from sequencing_renderer import render_sequencing_diagram, render_sequencing_pdf
+from pptx_export import export_gantt_pptx, export_block_pptx, export_sequencing_pptx
 
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -657,9 +658,10 @@ def show_visualizations():
             st.rerun()
 
     # Tabs
-    tab_gantt, tab_block, tab_data = st.tabs([
+    tab_gantt, tab_block, tab_seq, tab_data = st.tabs([
         "Gantt Chart",
         "Block Diagram",
+        "Sequencing Diagram",
         "Data Preview",
     ])
 
@@ -751,6 +753,56 @@ def show_visualizations():
 
         except Exception as e:
             st.error(f"Error rendering block diagram: {e}")
+            with st.expander("Show full error"):
+                st.code(traceback.format_exc())
+
+    # ── SEQUENCING DIAGRAM TAB ────────────────────────────────────────────
+    with tab_seq:
+        st.markdown("#### Sequencing Diagram")
+        st.caption("Shows work sequencing and overlap across the timeline. Overlapping blocks reveal capacity constraints — ideal for executive presentations.")
+
+        seq_aspect = st.selectbox(
+            "Slide Aspect Ratio",
+            options=["16:9", "4:3"],
+            index=0,
+            key="seq_aspect",
+            help="16:9 for widescreen displays and modern presentations. 4:3 for older projectors.",
+        )
+
+        try:
+            with st.spinner("Rendering sequencing diagram..."):
+                seq_preview = render_sequencing_diagram(items, config, dpi=150, slide_aspect=seq_aspect)
+            st.image(seq_preview, use_container_width=True)
+
+            st.markdown("---")
+            st.markdown('<div class="export-header">Export Sequencing Diagram</div>', unsafe_allow_html=True)
+            s1, s2, s3 = st.columns(3)
+
+            with s1:
+                hires_seq = render_sequencing_diagram(items, config, dpi=300, slide_aspect=seq_aspect)
+                st.download_button(
+                    "Download PNG (300 DPI)", data=hires_seq,
+                    file_name="sequencing_diagram.png", mime="image/png",
+                    use_container_width=True,
+                )
+            with s2:
+                seq_pdf_data = render_sequencing_pdf(items, config, dpi=300, slide_aspect=seq_aspect)
+                st.download_button(
+                    "Download PDF", data=seq_pdf_data,
+                    file_name="sequencing_diagram.pdf", mime="application/pdf",
+                    use_container_width=True,
+                )
+            with s3:
+                seq_pptx = export_sequencing_pptx(items, config)
+                st.download_button(
+                    "Download PowerPoint", data=seq_pptx,
+                    file_name="sequencing_diagram.pptx",
+                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    use_container_width=True,
+                )
+
+        except Exception as e:
+            st.error(f"Error rendering sequencing diagram: {e}")
             with st.expander("Show full error"):
                 st.code(traceback.format_exc())
 
