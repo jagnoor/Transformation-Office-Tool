@@ -558,8 +558,8 @@ def show_homepage():
         try:
             sample_bytes = create_template_bytes()
             loaded_items, loaded_config, loaded_warnings = read_excel(io.BytesIO(sample_bytes))
-            loaded_config.title = "Product Launch 2025"
-            loaded_config.subtitle = "Cross-functional roadmap"
+            loaded_config.title = "Transformation Roadmap 2025"
+            loaded_config.subtitle = "Sequenced delivery plan — 25 initiatives across 6 workstreams"
             loaded_config.palette_name = "Vibrant"
             st.session_state["items"] = loaded_items
             st.session_state["config"] = loaded_config
