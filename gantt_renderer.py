@@ -123,7 +123,7 @@ def _text_color_for_bg(hex_color: str) -> str:
     hex_color = hex_color.lstrip("#")
     r, g, b = int(hex_color[:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
     luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-    return "#FFFFFF" if luminance < 0.55 else "#1E293B"
+    return "#FFFFFF" if luminance < 0.5 else "#1E293B"
 
 
 def _auto_granularity(start: date, end: date) -> str:
@@ -201,7 +201,7 @@ def _render_gantt_figure(
     if config.subtitle:
         ax_header.text(
             0.02, 0.2, config.subtitle,
-            fontsize=11, color="#64748B",
+            fontsize=11, color="#475569",
             fontfamily=font_name, va="center",
         )
 
@@ -209,7 +209,7 @@ def _render_gantt_figure(
     date_range_text = f"{chart_start.strftime('%b %d, %Y')}  →  {chart_end.strftime('%b %d, %Y')}"
     ax_header.text(
         0.98, 0.5, date_range_text,
-        fontsize=9, color="#94A3B8",
+        fontsize=9, color="#64748B",
         fontfamily=font_name, va="center", ha="right",
     )
 
@@ -252,7 +252,7 @@ def _render_gantt_figure(
         ax_main.xaxis.set_major_locator(mdates.YearLocator())
         ax_main.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
 
-    ax_main.tick_params(axis="x", labelsize=8, colors="#64748B", length=3, pad=5)
+    ax_main.tick_params(axis="x", labelsize=8, colors="#475569", length=3, pad=5)
     ax_main.tick_params(axis="y", left=False, labelleft=False)
 
     # Subtle grid
@@ -414,7 +414,7 @@ def _render_gantt_figure(
                     ax_main.text(
                         end_num + 1, text_y,
                         item.label,
-                        fontsize=6.5, color="#94A3B8",
+                        fontsize=6.5, color="#64748B",
                         va="center", ha="left",
                         fontfamily=font_name,
                         zorder=7,
