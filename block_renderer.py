@@ -1,19 +1,19 @@
-"""Block Diagram renderer — space-filling timeline layout.
+"""Block Diagram renderer — space-filling mosaic timeline layout.
 
 This creates the "On Demand Pay 2019" style visualization where work items
-are packed into rows filling a single slide/page. Unlike a Gantt chart with
+are packed into a mosaic filling a single slide/page. Unlike a Gantt chart with
 swim lanes, this optimizes for space utilization to show how much parallel
 work is happening across the organization.
 
 Layout algorithm:
-1. Items are sorted by start date
-2. Greedy row-packing: each item is placed in the first row where it fits
-3. Rows fill vertically to use the full available space
-4. Items are sized horizontally proportional to their duration
-5. Items are sized vertically to fill available space
+1. Items are sorted by start date and packed into rows (greedy best-fit)
+2. Horizontal gaps are filled: blocks expand to cover all horizontal space
+3. Vertical gaps are filled: blocks expand downward into unoccupied rows
+4. Result is a dense mosaic with no visible gaps between blocks
 """
 import io
 import math
+from dataclasses import dataclass
 from collections import defaultdict
 from datetime import date, timedelta
 from typing import List, Optional, Tuple
@@ -27,6 +27,16 @@ import matplotlib.dates as mdates
 import numpy as np
 
 from models import WorkItem, ChartConfig, STATUS_COLORS
+
+
+@dataclass
+class BlockRect:
+    """Final layout geometry for a block in the mosaic."""
+    item: WorkItem
+    x_left: float     # 0..1 in content area
+    x_right: float    # 0..1 in content area
+    row_top: int       # starting row index (0 = topmost)
+    row_bottom: int    # ending row index (inclusive)
 
 
 def _resolve_font(preferred: str = "Arial") -> str:
@@ -83,10 +93,10 @@ def _wrap_text(text: str, max_chars_per_line: int) -> str:
 
 # ── Row-packing layout algorithm ─────────────────────────────────────────────
 
-def _pack_rows(items: List[WorkItem], chart_start: date, chart_end: date) -> List[List[WorkItem]]:
+def _pack_rows(items: List[WorkItem], chart_start: date, chart_end: date) -> List[List[Tuple[WorkItem, float, float]]]:
     """Pack items into rows using greedy best-fit algorithm.
 
-    Returns list of rows, where each row is a list of non-overlapping items.
+    Returns list of rows, where each row is a list of (item, x_start, x_end) tuples.
     """
     total_days = (chart_end - chart_start).days
     if total_days <= 0:
@@ -95,8 +105,8 @@ def _pack_rows(items: List[WorkItem], chart_start: date, chart_end: date) -> Lis
     # Sort by start date, then by longest duration first (harder to place)
     sorted_items = sorted(items, key=lambda it: (it.start_date, -it.duration_days, it.title))
 
-    rows = []  # Each row tracks occupied intervals as list of (start_frac, end_frac)
-    row_items = []  # Parallel list of item lists per row
+    rows = []       # Each row tracks occupied intervals as list of (start_frac, end_frac)
+    row_items = []   # Parallel list of (item, start_frac, end_frac) tuples per row
 
     for item in sorted_items:
         start_frac = max(0, (item.start_date - chart_start).days / total_days)
@@ -106,23 +116,128 @@ def _pack_rows(items: List[WorkItem], chart_start: date, chart_end: date) -> Lis
 
         placed = False
         for row_idx, intervals in enumerate(rows):
-            # Check if item fits in this row (no overlap)
             fits = True
             for (s, e) in intervals:
-                if start_frac < e and end_frac > s:  # overlap
+                if start_frac < e and end_frac > s:
                     fits = False
                     break
             if fits:
                 intervals.append((start_frac, end_frac))
-                row_items[row_idx].append(item)
+                row_items[row_idx].append((item, start_frac, end_frac))
                 placed = True
                 break
 
         if not placed:
             rows.append([(start_frac, end_frac)])
-            row_items.append([item])
+            row_items.append([(item, start_frac, end_frac)])
 
     return row_items
+
+
+def _fill_horizontal_gaps(rows: List[List[Tuple[WorkItem, float, float]]]) -> List[List[Tuple[WorkItem, float, float]]]:
+    """Expand blocks horizontally to fill all gaps in each row.
+
+    First item extends to x=0, last item extends to x=1, interior gaps
+    are split at the midpoint between adjacent blocks.
+    """
+    result = []
+    for row in rows:
+        if not row:
+            result.append(row)
+            continue
+
+        # Sort by x_start
+        sorted_row = sorted(row, key=lambda t: t[1])
+
+        if len(sorted_row) == 1:
+            item, _, _ = sorted_row[0]
+            result.append([(item, 0.0, 1.0)])
+            continue
+
+        # Compute new boundaries
+        new_row = []
+        for i, (item, x_start, x_end) in enumerate(sorted_row):
+            if i == 0:
+                new_left = 0.0
+            else:
+                # Midpoint between this item's original start and previous item's original end
+                prev_end = sorted_row[i - 1][2]
+                new_left = (prev_end + x_start) / 2
+
+            if i == len(sorted_row) - 1:
+                new_right = 1.0
+            else:
+                next_start = sorted_row[i + 1][1]
+                new_right = (x_end + next_start) / 2
+
+            new_row.append((item, new_left, new_right))
+
+        result.append(new_row)
+    return result
+
+
+def _fill_vertical_gaps(rows: List[List[Tuple[WorkItem, float, float]]], grid_cols: int = 200) -> List[BlockRect]:
+    """Use a 2D occupancy grid to allow blocks to span multiple rows vertically.
+
+    After initial placement, blocks expand downward into unoccupied cells,
+    creating the variable-height mosaic effect.
+    """
+    num_rows = len(rows)
+    if num_rows == 0:
+        return []
+
+    # Build occupancy grid (num_rows x grid_cols), initially all False
+    grid = [[False] * grid_cols for _ in range(num_rows)]
+
+    # Create BlockRect for each item and mark grid cells
+    blocks = []
+    for row_idx, row in enumerate(rows):
+        for item, x_left, x_right in row:
+            col_start = max(0, int(x_left * grid_cols))
+            col_end = min(grid_cols, int(x_right * grid_cols))
+            if col_end <= col_start:
+                col_end = col_start + 1
+
+            # Mark cells as occupied
+            for c in range(col_start, col_end):
+                grid[row_idx][c] = True
+
+            blocks.append(BlockRect(
+                item=item,
+                x_left=x_left,
+                x_right=x_right,
+                row_top=row_idx,
+                row_bottom=row_idx,
+            ))
+
+    # Expand blocks downward into unoccupied cells
+    # Process from bottom-to-top so lower blocks get priority first,
+    # then upper blocks can expand into remaining space
+    for block in sorted(blocks, key=lambda b: (-b.row_top, -b.x_left)):
+        col_start = max(0, int(block.x_left * grid_cols))
+        col_end = min(grid_cols, int(block.x_right * grid_cols))
+        if col_end <= col_start:
+            col_end = col_start + 1
+
+        # Try to expand downward
+        while block.row_bottom + 1 < num_rows:
+            next_row = block.row_bottom + 1
+            # Check if ALL cells in the column range are unoccupied in the next row
+            can_expand = True
+            for c in range(col_start, col_end):
+                if grid[next_row][c]:
+                    can_expand = False
+                    break
+
+            if can_expand:
+                # Mark the new cells as occupied
+                for c in range(col_start, col_end):
+                    grid[next_row][c] = True
+                block.row_bottom = next_row
+            else:
+                break
+
+    return blocks
 
 
 def _compute_time_columns(chart_start: date, chart_end: date) -> list:
@@ -130,7 +245,6 @@ def _compute_time_columns(chart_start: date, chart_end: date) -> list:
     span_days = (chart_end - chart_start).days
 
     if span_days <= 120:
-        # Monthly columns
         columns = []
         current = chart_start.replace(day=1)
         while current <= chart_end:
@@ -143,7 +257,6 @@ def _compute_time_columns(chart_start: date, chart_end: date) -> list:
         return columns, "months"
 
     elif span_days <= 548:
-        # Monthly
         columns = []
         current = chart_start.replace(day=1)
         while current <= chart_end:
@@ -156,7 +269,6 @@ def _compute_time_columns(chart_start: date, chart_end: date) -> list:
         return columns, "months"
 
     else:
-        # Quarterly
         columns = []
         current = chart_start.replace(day=1)
         q_month = ((current.month - 1) // 3) * 3 + 1
@@ -307,7 +419,7 @@ def _render_block_figure(items, config, dpi, slide_aspect="16:9"):
         if i > 0:
             ax_timeline.axvline(x=x_start, color="#475569", linewidth=0.5, zorder=2)
 
-    # ── Content area — pack blocks ───────────────────────────────────────
+    # ── Content area — mosaic blocks ─────────────────────────────────────
     ax_content = fig.add_axes([0.02, content_bot, 0.96, content_top - content_bot])
     ax_content.set_xlim(0, 1)
     ax_content.set_ylim(0, 1)
@@ -321,190 +433,170 @@ def _render_block_figure(items, config, dpi, slide_aspect="16:9"):
     )
     ax_content.add_patch(content_bg)
 
-    # Vertical grid lines matching timeline
+    # Vertical grid lines matching timeline (behind blocks)
     for i, (col_start, col_end, label) in enumerate(time_columns):
         x = (col_start - chart_start).days / total_days
         if i > 0:
-            ax_content.axvline(x=x, color="#E2E8F0", linewidth=0.5, zorder=1, alpha=0.5)
+            ax_content.axvline(x=x, color="#E2E8F0", linewidth=0.5, zorder=1, alpha=0.3)
 
-    # Pack items into rows
+    # ── Mosaic layout pipeline ───────────────────────────────────────────
     packed_rows = _pack_rows(items, chart_start, chart_end)
-    num_rows = len(packed_rows)
-    if num_rows == 0:
-        num_rows = 1
+    packed_rows = _fill_horizontal_gaps(packed_rows)
+    blocks = _fill_vertical_gaps(packed_rows)
+    num_rows = max(1, len(packed_rows))
 
-    # Row height — cap at a reasonable size so blocks aren't absurdly tall
-    row_gap = 0.008
-    total_gap = row_gap * (num_rows + 1)
-    natural_row_height = (1.0 - total_gap) / num_rows
+    # Row height — fill all vertical space, no gaps
+    row_height = 1.0 / num_rows
 
-    # Cap row height: for the reference "block diagram" look, blocks should
-    # be wider than tall. With few rows, limit height so content is readable.
-    # Max row height of ~0.18 gives a nice dense look even with 2-3 rows.
-    max_row_height = 0.22
-    row_height = min(natural_row_height, max_row_height)
-
-    # Center the rows vertically if we're not using full space
-    used_height = num_rows * row_height + (num_rows + 1) * row_gap
-    y_offset = (1.0 - used_height) / 2  # center vertically
-
-    block_pad_x = 0.003
-    block_pad_y = 0.003
+    # Minimal padding for thin border effect between blocks
+    block_pad_x = 0.0015
+    block_pad_y = 0.0015
 
     # Draw blocks
-    for row_idx, row_items in enumerate(packed_rows):
-        y_top = 1.0 - y_offset - row_gap - row_idx * (row_height + row_gap)
-        y_bot = y_top - row_height
+    for block in blocks:
+        item = block.item
+        x_s = block.x_left + block_pad_x
+        x_e = block.x_right - block_pad_x
+        if x_e <= x_s:
+            x_e = x_s + block_pad_x
 
-        for item in row_items:
-            x_start = max(0, (item.start_date - chart_start).days / total_days)
-            x_end = min(1, (item.end_date - chart_start).days / total_days)
-            if x_end <= x_start:
-                x_end = x_start + 1 / total_days
+        # y coordinates: row_top=0 is at top of content area
+        y_top = 1.0 - block.row_top * row_height - block_pad_y
+        y_bot = 1.0 - (block.row_bottom + 1) * row_height + block_pad_y
+        if y_bot >= y_top:
+            y_bot = y_top - block_pad_y
 
-            x_s = x_start + block_pad_x
-            x_e = x_end - block_pad_x
-            if x_e <= x_s:
-                x_e = x_s + block_pad_x
+        bw = x_e - x_s
+        bh = y_top - y_bot
 
-            bw = x_e - x_s
-            bh = row_height - block_pad_y * 2
+        # Color
+        base_color = config.get_category_color(item.category, categories)
+        bar_color = item.color_override if item.color_override else base_color
+        border_color = _darken_color(bar_color, 0.15)
+        text_color = _text_color_for_bg(bar_color)
 
-            # Color
-            base_color = config.get_category_color(item.category, categories)
-            bar_color = item.color_override if item.color_override else base_color
-            border_color = _darken_color(bar_color, 0.15)
-            text_color = _text_color_for_bg(bar_color)
+        # All items rendered as blocks (including milestones) for mosaic consistency
+        block_rect = FancyBboxPatch(
+            (x_s, y_bot), bw, bh,
+            boxstyle="round,pad=0,rounding_size=0.003",
+            facecolor=bar_color, edgecolor=border_color,
+            linewidth=0.8, zorder=3,
+        )
+        ax_content.add_patch(block_rect)
 
-            if item.is_milestone:
-                mid_x = (x_s + x_e) / 2
-                mid_y = (y_top + y_bot) / 2
-                size_x = min(0.012, bw / 2)
-                size_y = bh * 0.35
-                diamond = plt.Polygon([
-                    [mid_x, mid_y + size_y], [mid_x + size_x, mid_y],
-                    [mid_x, mid_y - size_y], [mid_x - size_x, mid_y],
-                ], closed=True, facecolor=bar_color, edgecolor=border_color,
-                    linewidth=1.5, zorder=5)
-                ax_content.add_patch(diamond)
-                ax_content.text(mid_x + size_x + 0.005, mid_y, item.title,
-                                fontsize=7, color="#334155", va="center", ha="left",
-                                fontfamily=font_name, fontweight="medium", zorder=6)
-                continue
-
-            # Main block rectangle
-            block_rect = FancyBboxPatch(
-                (x_s, y_bot + block_pad_y), bw, bh,
-                boxstyle="round,pad=0,rounding_size=0.005",
-                facecolor=bar_color, edgecolor=border_color,
-                linewidth=0.8, zorder=3,
+        # Status indicator (thin top bar)
+        status_color = STATUS_COLORS.get(item.status, "#94A3B8")
+        if config.show_status and item.status != "planned":
+            stripe_h = min(0.005, bh * 0.06)
+            stripe = FancyBboxPatch(
+                (x_s, y_top - stripe_h), bw, stripe_h,
+                boxstyle="round,pad=0,rounding_size=0.002",
+                facecolor=status_color, edgecolor="none", zorder=4,
             )
-            ax_content.add_patch(block_rect)
+            ax_content.add_patch(stripe)
 
-            # Status indicator (thin top bar)
-            status_color = STATUS_COLORS.get(item.status, "#94A3B8")
-            if config.show_status and item.status != "planned":
-                stripe_h = min(0.006, bh * 0.08)
-                stripe = FancyBboxPatch(
-                    (x_s, y_top - block_pad_y - stripe_h), bw, stripe_h,
-                    boxstyle="round,pad=0,rounding_size=0.002",
-                    facecolor=status_color, edgecolor="none", zorder=4,
-                )
-                ax_content.add_patch(stripe)
+        # Milestone diamond overlay (small diamond icon in top-right corner)
+        if item.is_milestone:
+            diamond_size = min(0.008, bw * 0.15, bh * 0.15)
+            diamond_x = x_e - diamond_size * 2
+            diamond_y = y_top - diamond_size * 2
+            diamond = plt.Polygon([
+                [diamond_x, diamond_y + diamond_size],
+                [diamond_x + diamond_size, diamond_y],
+                [diamond_x, diamond_y - diamond_size],
+                [diamond_x - diamond_size, diamond_y],
+            ], closed=True, facecolor="#FFFFFF", edgecolor=border_color,
+                linewidth=1, zorder=5, alpha=0.8)
+            ax_content.add_patch(diamond)
 
-            # ── Text inside block ────────────────────────────────────────
-            # Scale font sizes relative to figure dimensions
-            # At 16" wide, 0.01 in x ≈ 0.16". A char at fontsize 9 ≈ 0.07"
-            fig_w_inches = fig.get_figwidth()
-            content_w_inches = fig_w_inches * 0.96  # axes width fraction
-            block_w_inches = bw * content_w_inches
-            content_h_inches = fig.get_figheight() * (content_top - content_bot)
-            block_h_inches = bh * content_h_inches
+        # ── Text inside block ────────────────────────────────────────
+        fig_w_inches = fig.get_figwidth()
+        content_w_inches = fig_w_inches * 0.96
+        block_w_inches = bw * content_w_inches
+        content_h_inches = fig.get_figheight() * (content_top - content_bot)
+        block_h_inches = bh * content_h_inches
 
-            # Approximate characters that fit
-            # At fontsize 9: ~7 chars per inch. At fontsize 8: ~8. At fontsize 7: ~9.
-            if block_w_inches >= 2.5:
-                title_fs = 10
-            elif block_w_inches >= 1.5:
-                title_fs = 9
-            elif block_w_inches >= 0.8:
-                title_fs = 8
-            elif block_w_inches >= 0.4:
-                title_fs = 7
-            else:
-                title_fs = 6
+        # Font size based on block width
+        if block_w_inches >= 2.5:
+            title_fs = 10
+        elif block_w_inches >= 1.5:
+            title_fs = 9
+        elif block_w_inches >= 0.8:
+            title_fs = 8
+        elif block_w_inches >= 0.4:
+            title_fs = 7
+        else:
+            title_fs = 6
 
-            chars_per_inch = title_fs * 0.9
-            max_chars_per_line = max(3, int(block_w_inches * chars_per_inch))
+        chars_per_inch = title_fs * 0.9
+        max_chars_per_line = max(3, int(block_w_inches * chars_per_inch))
 
-            # Lines that fit vertically (approx 0.18" per line at fontsize 9)
-            line_h_inches = title_fs * 0.018
-            max_lines = max(1, int(block_h_inches / line_h_inches * 0.75))
+        line_h_inches = title_fs * 0.018
+        max_lines = max(1, int(block_h_inches / line_h_inches * 0.75))
 
-            # Margin inside block
-            text_margin_x = bw * 0.04
-            text_margin_y = bh * 0.08
-            text_x = x_s + text_margin_x
-            text_y = y_top - block_pad_y - text_margin_y
+        # Margin inside block
+        text_margin_x = bw * 0.04
+        text_margin_y = bh * 0.06
+        text_x = x_s + text_margin_x
+        text_y = y_top - text_margin_y
 
-            # Don't render text if block is too narrow
-            if block_w_inches < 0.3:
-                continue
+        # Don't render text if block is too narrow
+        if block_w_inches < 0.3:
+            continue
 
-            lines_used = 0
+        lines_used = 0
 
-            # Label (e.g., "Delivery 1", "D1")
-            if item.label and max_lines >= 2:
-                ax_content.text(
-                    text_x, text_y, item.label,
-                    fontsize=title_fs - 0.5, color=text_color,
-                    va="top", ha="left", fontfamily=font_name,
-                    fontweight="bold", style="italic",
-                    zorder=5, alpha=0.85,
-                )
-                text_y -= line_h_inches / content_h_inches * 1.1
-                lines_used += 1
-
-            # Title (bold)
-            title_text = item.title
-            wrapped_title = _wrap_text(title_text, max_chars_per_line)
-            title_lines = wrapped_title.split("\n")
-            available_title_lines = max(1, min(len(title_lines), max_lines - lines_used))
-            if available_title_lines < len(title_lines):
-                title_lines = title_lines[:available_title_lines]
-                last = title_lines[-1]
-                if len(last) > 2:
-                    title_lines[-1] = last[:-1] + "…"
-            display_title = "\n".join(title_lines)
-
+        # Label (e.g., "Delivery 1")
+        if item.label and max_lines >= 2:
             ax_content.text(
-                text_x, text_y, display_title,
-                fontsize=title_fs, color=text_color,
+                text_x, text_y, item.label,
+                fontsize=title_fs - 0.5, color=text_color,
                 va="top", ha="left", fontfamily=font_name,
-                fontweight="bold", zorder=5,
-                linespacing=1.2,
+                fontweight="bold", style="italic",
+                zorder=5, alpha=0.85,
             )
-            lines_used += len(title_lines)
-            text_y -= len(title_lines) * line_h_inches / content_h_inches * 1.15
+            text_y -= line_h_inches / content_h_inches * 1.1
+            lines_used += 1
 
-            # Description (smaller, lighter)
-            remaining_lines = max_lines - lines_used - 1
-            if item.description and remaining_lines >= 1 and block_w_inches >= 1.0:
-                desc_fs = max(5.5, title_fs - 1.5)
-                desc_chars = max(3, int(block_w_inches * desc_fs * 0.9))
-                desc_wrapped = _wrap_text(item.description, desc_chars)
-                desc_lines = desc_wrapped.split("\n")[:remaining_lines]
+        # Title (bold)
+        title_text = item.title
+        wrapped_title = _wrap_text(title_text, max_chars_per_line)
+        title_lines = wrapped_title.split("\n")
+        available_title_lines = max(1, min(len(title_lines), max_lines - lines_used))
+        if available_title_lines < len(title_lines):
+            title_lines = title_lines[:available_title_lines]
+            last = title_lines[-1]
+            if len(last) > 2:
+                title_lines[-1] = last[:-1] + "\u2026"
+        display_title = "\n".join(title_lines)
 
-                # Add bullet points
-                desc_display = "\n".join("• " + l for l in desc_lines)
+        ax_content.text(
+            text_x, text_y, display_title,
+            fontsize=title_fs, color=text_color,
+            va="top", ha="left", fontfamily=font_name,
+            fontweight="bold", zorder=5,
+            linespacing=1.2,
+        )
+        lines_used += len(title_lines)
+        text_y -= len(title_lines) * line_h_inches / content_h_inches * 1.15
 
-                desc_alpha = 0.75 if text_color == "#FFFFFF" else 0.55
-                ax_content.text(
-                    text_x, text_y, desc_display,
-                    fontsize=desc_fs, color=text_color,
-                    va="top", ha="left", fontfamily=font_name,
-                    zorder=5, alpha=desc_alpha, linespacing=1.15,
-                )
+        # Description (smaller, lighter)
+        remaining_lines = max_lines - lines_used - 1
+        if item.description and remaining_lines >= 1 and block_w_inches >= 1.0:
+            desc_fs = max(5.5, title_fs - 1.5)
+            desc_chars = max(3, int(block_w_inches * desc_fs * 0.9))
+            desc_wrapped = _wrap_text(item.description, desc_chars)
+            desc_lines = desc_wrapped.split("\n")[:remaining_lines]
+
+            desc_display = "\n".join("\u2022 " + l for l in desc_lines)
+
+            desc_alpha = 0.75 if text_color == "#FFFFFF" else 0.55
+            ax_content.text(
+                text_x, text_y, desc_display,
+                fontsize=desc_fs, color=text_color,
+                va="top", ha="left", fontfamily=font_name,
+                zorder=5, alpha=desc_alpha, linespacing=1.15,
+            )
 
     # ── Today line ───────────────────────────────────────────────────────
     if config.show_today_line:
