@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**Transformation Office — Block & Gantt Creator Tool** (v0.9 Beta)
+**Transformation Office — Block & Gantt Creator Tool** (v1.0)
 
 A Streamlit web app that transforms Excel spreadsheets into presentation-ready project visualizations: Gantt charts and space-filling block diagrams. Users upload `.xlsx` files and export results as PNG, PDF, or editable PowerPoint.
 

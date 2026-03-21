@@ -1,12 +1,10 @@
 # Transformation Office — Block & Gantt Creator Tool
 
-> **Version 0.9 Beta** — Early Access Preview
+> **Version 1.0** — General Release
 
 **Turn a simple spreadsheet into presentation-ready project visualizations in under 60 seconds.**
 
 No coding required. No complex project management software. Just your data in Excel and a web browser.
-
-> **Please Note:** This tool is currently in active development as an early access preview. We are gathering user feedback and iterating on functionality, design, and accuracy. You may encounter occasional formatting inconsistencies or limitations. Your input is invaluable — please share any feedback, issues, or feature requests with the Transformation Office team so we can continue to improve the tool for everyone.
 
 ---
 
@@ -251,11 +249,30 @@ Each person runs the tool independently on their own computer. There is no share
 
 ---
 
+---
+
+## Changelog
+
+### v1.0 — General Release
+- Removed Sequencing Diagram — the tool now focuses on two core visualization modes: **Gantt Chart** and **Block Diagram**
+- Upgraded Block Diagram to a true space-filling mosaic layout with proportional sizing and improved text rendering
+- Updated version from 0.9 Beta to 1.0
+- Cleaned up unused feature branches and codebase
+
+### v0.9 Beta — Early Access Preview
+- Initial release with Gantt Chart, Block Diagram, and Sequencing Diagram
+- Excel upload with flexible column matching and multi-format date parsing
+- Export to PowerPoint (editable shapes), PDF, and PNG (300 DPI)
+- 6 color palettes: Ocean, Sunset, Forest, Corporate, Vibrant, Monochrome
+- Sample data and Excel template generation
+
+---
+
 <div align="center">
 
 **Transformation Office — Block & Gantt Creator Tool**
 
-Version 0.9 Beta · Early Access Preview
+Version 1.0
 
 *For internal use. Please direct feedback and feature requests to the Transformation Office team.*
 
