@@ -329,7 +329,7 @@ def export_block_pptx(items: List[WorkItem], config: ChartConfig) -> bytes:
         p2.font.color.rgb = _hex_to_rgb("#64748B")
 
     # Timeline header
-    from block_renderer import _compute_time_columns, _pack_rows
+    from block_renderer import _compute_time_columns, _pack_rows, _fill_horizontal_gaps, _fill_vertical_gaps
     time_columns, _ = _compute_time_columns(chart_start, chart_end)
     timeline_top = margin + header_h
 
@@ -354,78 +354,75 @@ def export_block_pptx(items: List[WorkItem], config: ChartConfig) -> bytes:
         p.font.color.rgb = _hex_to_rgb("#F1F5F9")
         p.alignment = PP_ALIGN.CENTER
 
-    # Pack rows
+    # Mosaic layout pipeline
     packed_rows = _pack_rows(items, chart_start, chart_end)
+    packed_rows = _fill_horizontal_gaps(packed_rows)
+    blocks = _fill_vertical_gaps(packed_rows)
     num_rows = max(1, len(packed_rows))
-    row_gap = Inches(0.05)
-    row_h = (content_h - row_gap * (num_rows + 1)) / num_rows
+    row_h = content_h / num_rows
+    block_pad = Inches(0.02)
 
-    for row_idx, row_items in enumerate(packed_rows):
-        y_top = int(content_top + row_gap + row_idx * (row_h + row_gap))
+    for block in blocks:
+        item = block.item
 
-        for item in row_items:
-            x_frac_start = max(0, (item.start_date - chart_start).days / total_days)
-            x_frac_end = min(1, (item.end_date - chart_start).days / total_days)
-            if x_frac_end <= x_frac_start:
-                x_frac_end = x_frac_start + 1 / total_days
+        left = int(content_left + content_w * block.x_left + block_pad)
+        width = max(int(content_w * (block.x_right - block.x_left) - block_pad * 2), Inches(0.15))
+        y_top_pos = int(content_top + block.row_top * row_h + block_pad)
+        height = max(int((block.row_bottom - block.row_top + 1) * row_h - block_pad * 2), Inches(0.3))
 
-            left = int(content_left + content_w * x_frac_start + Inches(0.03))
-            width = max(int(content_w * (x_frac_end - x_frac_start) - Inches(0.06)), Inches(0.15))
-            height = max(int(row_h), Inches(0.3))
+        bar_color = config.get_category_color(item.category, categories)
+        if item.color_override:
+            bar_color = item.color_override
+        txt_color = _text_color_for_bg(bar_color)
 
-            bar_color = config.get_category_color(item.category, categories)
-            if item.color_override:
-                bar_color = item.color_override
-            txt_color = _text_color_for_bg(bar_color)
+        shape = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            left, y_top_pos, width, height,
+        )
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = _hex_to_rgb(bar_color)
+        shape.line.color.rgb = _hex_to_rgb(_darken_color(bar_color, 0.15))
+        shape.line.width = Pt(0.75)
 
-            shape = slide.shapes.add_shape(
-                MSO_SHAPE.ROUNDED_RECTANGLE,
-                left, y_top, width, height,
-            )
-            shape.fill.solid()
-            shape.fill.fore_color.rgb = _hex_to_rgb(bar_color)
-            shape.line.color.rgb = _hex_to_rgb(_darken_color(bar_color, 0.15))
-            shape.line.width = Pt(0.75)
+        tf = shape.text_frame
+        tf.word_wrap = True
+        tf.auto_size = None
 
-            tf = shape.text_frame
-            tf.word_wrap = True
-            tf.auto_size = None
+        # Label
+        if item.label:
+            p = tf.paragraphs[0]
+            p.text = item.label
+            p.font.size = Pt(7)
+            p.font.bold = True
+            p.font.color.rgb = _hex_to_rgb(txt_color)
+            p.font.italic = True
+            p.space_before = Pt(2)
+            p.space_after = Pt(0)
 
-            # Label
-            if item.label:
-                p = tf.paragraphs[0]
-                p.text = item.label
-                p.font.size = Pt(7)
-                p.font.bold = True
-                p.font.color.rgb = _hex_to_rgb(txt_color)
-                p.font.italic = True
-                p.space_before = Pt(2)
-                p.space_after = Pt(0)
+            p2 = tf.add_paragraph()
+            p2.text = item.title
+            p2.font.size = Pt(min(9, max(6, int(height / Inches(0.07)))))
+            p2.font.bold = True
+            p2.font.color.rgb = _hex_to_rgb(txt_color)
+            p2.space_before = Pt(1)
+            p2.space_after = Pt(0)
+        else:
+            p = tf.paragraphs[0]
+            p.text = item.title
+            p.font.size = Pt(min(9, max(6, int(height / Inches(0.07)))))
+            p.font.bold = True
+            p.font.color.rgb = _hex_to_rgb(txt_color)
+            p.space_before = Pt(2)
+            p.space_after = Pt(0)
 
-                p2 = tf.add_paragraph()
-                p2.text = item.title
-                p2.font.size = Pt(min(9, max(6, int(height / Inches(0.07)))))
-                p2.font.bold = True
-                p2.font.color.rgb = _hex_to_rgb(txt_color)
-                p2.space_before = Pt(1)
-                p2.space_after = Pt(0)
-            else:
-                p = tf.paragraphs[0]
-                p.text = item.title
-                p.font.size = Pt(min(9, max(6, int(height / Inches(0.07)))))
-                p.font.bold = True
-                p.font.color.rgb = _hex_to_rgb(txt_color)
-                p.space_before = Pt(2)
-                p.space_after = Pt(0)
-
-            # Description
-            if item.description:
-                p3 = tf.add_paragraph()
-                desc = item.description[:100]
-                p3.text = f"• {desc}"
-                p3.font.size = Pt(min(7, max(5, int(height / Inches(0.1)))))
-                p3.font.color.rgb = _hex_to_rgb(txt_color)
-                p3.space_before = Pt(1)
+        # Description
+        if item.description:
+            p3 = tf.add_paragraph()
+            desc = item.description[:100]
+            p3.text = f"\u2022 {desc}"
+            p3.font.size = Pt(min(7, max(5, int(height / Inches(0.1)))))
+            p3.font.color.rgb = _hex_to_rgb(txt_color)
+            p3.space_before = Pt(1)
 
     # Legend
     legend_y = int(slide_h - legend_h)
