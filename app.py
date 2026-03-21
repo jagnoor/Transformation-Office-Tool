@@ -105,10 +105,10 @@ st.markdown("""
 
     /* ── Cards ───────────────────────────────────────────────────── */
     .card {
-        background: rgba(255,255,255,0.85); backdrop-filter: blur(12px);
+        background: rgba(255,255,255,0.92); backdrop-filter: blur(12px);
         border-radius: 16px; padding: 1.6rem;
-        box-shadow: 0 2px 12px rgba(0,0,0,0.04), 0 0 0 1px rgba(0,0,0,0.03);
-        border: 1px solid rgba(255,255,255,0.8);
+        box-shadow: 0 2px 12px rgba(0,0,0,0.06), 0 0 0 1px rgba(124,58,237,0.08);
+        border: 1px solid rgba(124,58,237,0.12);
         margin-bottom: 1rem; height: 100%;
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     }
@@ -119,11 +119,9 @@ st.markdown("""
     .card h3 {
         margin-top: 0; font-weight: 700; font-size: 1.08rem;
         font-family: 'Space Grotesk', sans-serif;
-        background: linear-gradient(135deg, #7C3AED, #2563EB);
-        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        background-clip: text;
+        color: #4C1D95;
     }
-    .card p { color: #475569; font-size: 0.9rem; line-height: 1.6; }
+    .card p { color: #334155; font-size: 0.9rem; line-height: 1.6; }
 
     .feature-icon {
         width: 52px; height: 52px; border-radius: 14px;
@@ -132,10 +130,22 @@ st.markdown("""
         box-shadow: 0 3px 10px rgba(0,0,0,0.06);
     }
 
+    /* ── Markdown headings ───────────────────────────────────────── */
+    .stMarkdown h4, .stMarkdown h3, .stMarkdown h2 {
+        color: #1E293B !important;
+    }
+    .stMarkdown p, .stMarkdown li {
+        color: #334155;
+    }
+    .stCaption, [data-testid="stCaptionContainer"] {
+        color: #475569 !important;
+    }
+
     /* ── Tabs ────────────────────────────────────────────────────── */
     .stTabs [data-baseweb="tab-list"] { gap: 8px; }
     .stTabs [data-baseweb="tab"] {
         border-radius: 10px; padding: 8px 22px; font-weight: 600;
+        color: #334155;
     }
 
     /* ── Buttons ─────────────────────────────────────────────────── */
@@ -168,32 +178,28 @@ st.markdown("""
     .sidebar-brand .brand-name {
         font-size: 0.8rem; font-weight: 700;
         font-family: 'Space Grotesk', sans-serif;
-        background: linear-gradient(135deg, #7C3AED, #2563EB);
-        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        background-clip: text;
+        color: #4C1D95;
         text-transform: uppercase; letter-spacing: 0.08em;
     }
     .sidebar-brand .brand-sub {
-        font-size: 0.65rem; color: #64748B; margin-top: 0.15rem;
+        font-size: 0.65rem; color: #475569; margin-top: 0.15rem;
     }
 
     /* ── Metrics ─────────────────────────────────────────────────── */
     [data-testid="stMetric"] {
-        background: rgba(255,255,255,0.8); backdrop-filter: blur(8px);
+        background: rgba(255,255,255,0.92); backdrop-filter: blur(8px);
         border-radius: 14px; padding: 1rem;
-        border: 1px solid rgba(255,255,255,0.6);
-        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+        border: 1px solid rgba(124,58,237,0.1);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
     }
     [data-testid="stMetricLabel"] {
         font-size: 0.72rem !important; font-weight: 700 !important;
         text-transform: uppercase; letter-spacing: 0.05em;
-        color: #7C3AED !important;
+        color: #5B21B6 !important;
     }
     [data-testid="stMetricValue"] {
         font-weight: 800 !important;
-        background: linear-gradient(135deg, #7C3AED, #2563EB) !important;
-        -webkit-background-clip: text !important; -webkit-text-fill-color: transparent !important;
-        background-clip: text !important;
+        color: #1E1B4B !important;
     }
 
     /* ── Hide Streamlit chrome ───────────────────────────────────── */
@@ -278,9 +284,7 @@ st.markdown("""
     .section-header {
         font-size: 1.2rem; font-weight: 700;
         font-family: 'Space Grotesk', sans-serif;
-        background: linear-gradient(135deg, #7C3AED, #2563EB);
-        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        background-clip: text;
+        color: #3B1F8B;
         margin: 1.75rem 0 0.85rem 0; padding-bottom: 0.5rem;
         border-bottom: 2px solid transparent;
         border-image: linear-gradient(90deg, #7C3AED, #2563EB, transparent) 1;
@@ -294,19 +298,17 @@ st.markdown("""
         margin-top: 2.5rem;
     }
     .app-footer p {
-        font-size: 0.75rem; color: #94A3B8; margin: 0.15rem 0;
+        font-size: 0.75rem; color: #64748B; margin: 0.15rem 0;
     }
     .app-footer .footer-label {
         font-weight: 700; text-transform: uppercase;
         letter-spacing: 0.08em; font-size: 0.65rem;
-        background: linear-gradient(135deg, #7C3AED, #2563EB);
-        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        background-clip: text;
+        color: #5B21B6;
     }
 
     /* ── Export section ───────────────────────────────────────────── */
     .export-header {
-        font-size: 0.85rem; font-weight: 700; color: #6D28D9;
+        font-size: 0.85rem; font-weight: 700; color: #4C1D95;
         text-transform: uppercase; letter-spacing: 0.05em;
         margin-bottom: 0.5rem; padding-top: 0.5rem;
         font-family: 'Space Grotesk', sans-serif;
@@ -324,12 +326,10 @@ st.markdown("""
     .welcome-hero h2 {
         font-family: 'Space Grotesk', sans-serif;
         font-size: 1.5rem; font-weight: 700; margin: 0;
-        background: linear-gradient(135deg, #7C3AED 0%, #2563EB 50%, #0891B2 100%);
-        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        background-clip: text;
+        color: #3B1F8B;
     }
     .welcome-hero p {
-        color: #64748B; font-size: 0.92rem; margin: 0.35rem 0 0 0;
+        color: #475569; font-size: 0.92rem; margin: 0.35rem 0 0 0;
     }
 
     /* ── Stat pills on viz page ──────────────────────────────────── */
@@ -342,6 +342,7 @@ st.markdown("""
         padding: 0.4rem 0.9rem; border-radius: 20px;
         font-size: 0.82rem; font-weight: 600;
         backdrop-filter: blur(8px);
+        border: 1px solid rgba(0,0,0,0.06);
     }
     .stat-pill .pill-icon { font-size: 1rem; }
     .stat-pill .pill-val { font-family: 'Space Grotesk', sans-serif; font-weight: 700; }
@@ -491,10 +492,8 @@ with st.sidebar:
     <div style="text-align: center; padding: 0.25rem 0;">
         <div style="font-size: 0.6rem; text-transform: uppercase;
              letter-spacing: 0.08em; font-weight: 700;
-             background: linear-gradient(135deg, #7C3AED, #2563EB);
-             -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-             background-clip: text;">Version</div>
-        <div style="font-size: 0.7rem; color: #64748B; font-weight: 600;">v{APP_VERSION}</div>
+             color: #5B21B6;">Version</div>
+        <div style="font-size: 0.7rem; color: #475569; font-weight: 600;">v{APP_VERSION}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -768,27 +767,27 @@ def show_visualizations():
 
     st.markdown(f"""
     <div class="stat-ribbon">
-        <span class="stat-pill" style="background: linear-gradient(135deg, #EDE9FE, #DDD6FE); color: #6D28D9;">
+        <span class="stat-pill" style="background: linear-gradient(135deg, #EDE9FE, #DDD6FE); color: #4C1D95;">
             <span class="pill-icon">&#x1F4CA;</span>
             <span class="pill-val">{len(items)}</span> items
         </span>
-        <span class="stat-pill" style="background: linear-gradient(135deg, #DBEAFE, #BFDBFE); color: #1D4ED8;">
+        <span class="stat-pill" style="background: linear-gradient(135deg, #DBEAFE, #BFDBFE); color: #1E3A8A;">
             <span class="pill-icon">&#x1F3AF;</span>
             <span class="pill-val">{len(all_categories)}</span> categories
         </span>
-        <span class="stat-pill" style="background: linear-gradient(135deg, #D1FAE5, #A7F3D0); color: #047857;">
+        <span class="stat-pill" style="background: linear-gradient(135deg, #D1FAE5, #A7F3D0); color: #065F46;">
             <span class="pill-icon">&#x1F552;</span>
             <span class="pill-val">{span_months}</span> months
         </span>
-        <span class="stat-pill" style="background: linear-gradient(135deg, #FEF3C7, #FDE68A); color: #B45309;">
+        <span class="stat-pill" style="background: linear-gradient(135deg, #FEF3C7, #FDE68A); color: #92400E;">
             <span class="pill-icon">&#x1F525;</span>
             <span class="pill-val">{in_progress_count}</span> in progress
         </span>
-        <span class="stat-pill" style="background: linear-gradient(135deg, #D1FAE5, #BBF7D0); color: #15803D;">
+        <span class="stat-pill" style="background: linear-gradient(135deg, #D1FAE5, #BBF7D0); color: #064E3B;">
             <span class="pill-icon">&#x2705;</span>
             <span class="pill-val">{done_count}</span> done
         </span>
-        {"<span class='stat-pill' style='background: linear-gradient(135deg, #FCE7F3, #FBCFE8); color: #BE185D;'><span class='pill-icon'>&#x1F48E;</span><span class='pill-val'>" + str(milestones) + "</span> milestones</span>" if milestones > 0 else ""}
+        {"<span class='stat-pill' style='background: linear-gradient(135deg, #FCE7F3, #FBCFE8); color: #9D174D;'><span class='pill-icon'>&#x1F48E;</span><span class='pill-val'>" + str(milestones) + "</span> milestones</span>" if milestones > 0 else ""}
     </div>
     """, unsafe_allow_html=True)
 

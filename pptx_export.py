@@ -34,7 +34,7 @@ def _text_color_for_bg(hex_color: str) -> str:
     hex_color = hex_color.lstrip("#")
     r, g, b = int(hex_color[:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
     luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-    return "#FFFFFF" if luminance < 0.55 else "#1E293B"
+    return "#FFFFFF" if luminance < 0.5 else "#1E293B"
 
 
 def _lighten_color(hex_color: str, factor: float = 0.85) -> str:

@@ -70,7 +70,7 @@ def _text_color_for_bg(hex_color: str) -> str:
     hex_color = hex_color.lstrip("#")
     r, g, b = int(hex_color[:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
     luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-    return "#FFFFFF" if luminance < 0.55 else "#1E293B"
+    return "#FFFFFF" if luminance < 0.5 else "#1E293B"
 
 
 def _wrap_text(text: str, max_chars_per_line: int) -> str:
@@ -379,11 +379,11 @@ def _render_block_figure(items, config, dpi, slide_aspect="16:9"):
     ax_header.text(0.0, 0.65, config.title, fontsize=22, fontweight="bold",
                    color="#0F172A", fontfamily=font_name, va="center")
     if config.subtitle:
-        ax_header.text(0.0, 0.1, config.subtitle, fontsize=12, color="#64748B",
+        ax_header.text(0.0, 0.1, config.subtitle, fontsize=12, color="#475569",
                        fontfamily=font_name, va="center")
 
     date_text = f"{chart_start.strftime('%b %Y')} — {chart_end.strftime('%b %Y')}"
-    ax_header.text(1.0, 0.5, date_text, fontsize=10, color="#94A3B8",
+    ax_header.text(1.0, 0.5, date_text, fontsize=10, color="#64748B",
                    fontfamily=font_name, va="center", ha="right")
 
     # ── Timeline header band ─────────────────────────────────────────────
@@ -590,7 +590,7 @@ def _render_block_figure(items, config, dpi, slide_aspect="16:9"):
 
             desc_display = "\n".join("\u2022 " + l for l in desc_lines)
 
-            desc_alpha = 0.75 if text_color == "#FFFFFF" else 0.55
+            desc_alpha = 0.85 if text_color == "#FFFFFF" else 0.7
             ax_content.text(
                 text_x, text_y, desc_display,
                 fontsize=desc_fs, color=text_color,
