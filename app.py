@@ -36,133 +36,164 @@ st.set_page_config(
 st.markdown("""
 <style>
     /* ── Global ─────────────────────────────────────────────────── */
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@500;600;700&display=swap');
 
     .stApp {
-        background-color: #F8FAFC;
+        background: linear-gradient(160deg, #FFF7ED 0%, #FDF2F8 25%, #EFF6FF 50%, #F0FDF4 75%, #FFFBEB 100%);
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+
+    /* ── Animated background blobs ──────────────────────────────── */
+    @keyframes blob-float {
+        0%, 100% { transform: translate(0, 0) scale(1); }
+        33% { transform: translate(30px, -20px) scale(1.05); }
+        66% { transform: translate(-15px, 15px) scale(0.95); }
     }
 
     /* ── Header ─────────────────────────────────────────────────── */
     .main-header {
-        background: linear-gradient(135deg, #0F172A 0%, #1E293B 40%, #1E3A5F 100%);
+        background: linear-gradient(135deg, #7C3AED 0%, #2563EB 30%, #0891B2 60%, #059669 100%);
         color: white;
-        padding: 2.25rem 2.5rem 2rem;
-        border-radius: 16px;
-        margin-bottom: 0.5rem;
-        box-shadow: 0 4px 24px rgba(15, 23, 42, 0.18);
+        padding: 2.5rem 2.5rem 2.25rem;
+        border-radius: 20px;
+        margin-bottom: 0.75rem;
+        box-shadow: 0 8px 32px rgba(124, 58, 237, 0.25), 0 2px 8px rgba(37, 99, 235, 0.15);
         position: relative;
         overflow: hidden;
     }
     .main-header::before {
         content: '';
-        position: absolute; top: 0; right: 0;
-        width: 300px; height: 100%;
-        background: radial-gradient(circle at 80% 50%, rgba(59,130,246,0.12) 0%, transparent 70%);
+        position: absolute; top: -50%; right: -20%;
+        width: 400px; height: 400px;
+        background: radial-gradient(circle, rgba(255,255,255,0.12) 0%, transparent 70%);
+        border-radius: 50%;
+        animation: blob-float 8s ease-in-out infinite;
+        pointer-events: none;
+    }
+    .main-header::after {
+        content: '';
+        position: absolute; bottom: -30%; left: 10%;
+        width: 300px; height: 300px;
+        background: radial-gradient(circle, rgba(251,191,36,0.15) 0%, transparent 70%);
+        border-radius: 50%;
+        animation: blob-float 10s ease-in-out infinite reverse;
         pointer-events: none;
     }
     .main-header .header-label {
-        font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
-        letter-spacing: 0.12em; color: #60A5FA; margin-bottom: 0.35rem;
+        font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.15em; color: #FDE68A; margin-bottom: 0.4rem;
+        font-family: 'Space Grotesk', sans-serif;
     }
     .main-header h1 {
-        font-size: 1.85rem; font-weight: 800; margin: 0; letter-spacing: -0.025em;
-        line-height: 1.2;
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: 2rem; font-weight: 700; margin: 0; letter-spacing: -0.025em;
+        line-height: 1.15;
+        text-shadow: 0 2px 12px rgba(0,0,0,0.15);
     }
     .main-header .subtitle {
-        color: #94A3B8; margin: 0.35rem 0 0 0; font-size: 0.95rem;
+        color: rgba(255,255,255,0.85); margin: 0.4rem 0 0 0; font-size: 0.95rem;
         font-weight: 400;
     }
     .main-header .version-badge {
         position: absolute; top: 1.25rem; right: 1.5rem;
-        background: rgba(251, 191, 36, 0.15); color: #FBBF24;
+        background: rgba(255,255,255,0.2); color: white;
         font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
-        letter-spacing: 0.08em; padding: 0.25rem 0.65rem;
-        border-radius: 20px; border: 1px solid rgba(251, 191, 36, 0.3);
+        letter-spacing: 0.08em; padding: 0.25rem 0.75rem;
+        border-radius: 20px; border: 1px solid rgba(255,255,255,0.3);
+        backdrop-filter: blur(8px);
     }
-
-    /* ── Beta banner ────────────────────────────────────────────── */
-    .beta-banner {
-        background: linear-gradient(90deg, #FFFBEB 0%, #FEF3C7 100%);
-        border: 1px solid #F59E0B;
-        border-left: 4px solid #F59E0B;
-        border-radius: 8px;
-        padding: 0.75rem 1.25rem;
-        margin-bottom: 1.25rem;
-        display: flex; align-items: center; gap: 0.75rem;
-    }
-    .beta-banner .beta-icon {
-        font-size: 1.1rem; flex-shrink: 0;
-    }
-    .beta-banner .beta-text {
-        font-size: 0.82rem; color: #92400E; line-height: 1.45;
-    }
-    .beta-banner .beta-text strong { color: #78350F; }
 
     /* ── Cards ───────────────────────────────────────────────────── */
     .card {
-        background: white; border-radius: 12px; padding: 1.5rem;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.05); border: 1px solid #E2E8F0;
+        background: rgba(255,255,255,0.85); backdrop-filter: blur(12px);
+        border-radius: 16px; padding: 1.6rem;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.04), 0 0 0 1px rgba(0,0,0,0.03);
+        border: 1px solid rgba(255,255,255,0.8);
         margin-bottom: 1rem; height: 100%;
-        transition: box-shadow 0.2s ease, transform 0.2s ease;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     }
     .card:hover {
-        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-        transform: translateY(-1px);
+        box-shadow: 0 12px 28px rgba(124,58,237,0.12), 0 0 0 1px rgba(124,58,237,0.08);
+        transform: translateY(-4px);
     }
-    .card h3 { margin-top: 0; color: #0F172A; font-weight: 700; font-size: 1.05rem; }
-    .card p { color: #64748B; font-size: 0.9rem; line-height: 1.55; }
+    .card h3 {
+        margin-top: 0; font-weight: 700; font-size: 1.08rem;
+        font-family: 'Space Grotesk', sans-serif;
+        background: linear-gradient(135deg, #7C3AED, #2563EB);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    .card p { color: #475569; font-size: 0.9rem; line-height: 1.6; }
 
     .feature-icon {
-        width: 48px; height: 48px; border-radius: 12px;
+        width: 52px; height: 52px; border-radius: 14px;
         display: flex; align-items: center; justify-content: center;
-        font-size: 1.5rem; margin-bottom: 0.75rem;
+        font-size: 1.6rem; margin-bottom: 0.85rem;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.06);
     }
 
     /* ── Tabs ────────────────────────────────────────────────────── */
     .stTabs [data-baseweb="tab-list"] { gap: 8px; }
     .stTabs [data-baseweb="tab"] {
-        border-radius: 8px; padding: 8px 20px; font-weight: 600;
+        border-radius: 10px; padding: 8px 22px; font-weight: 600;
     }
 
     /* ── Buttons ─────────────────────────────────────────────────── */
     .stDownloadButton > button {
-        border-radius: 8px; font-weight: 600; padding: 0.5rem 1.5rem;
+        border-radius: 10px; font-weight: 600; padding: 0.5rem 1.5rem;
+        transition: all 0.2s ease;
+    }
+    .stDownloadButton > button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(124,58,237,0.2);
     }
 
     /* ── Sidebar ─────────────────────────────────────────────────── */
     section[data-testid="stSidebar"] {
-        background-color: #FFFFFF; border-right: 1px solid #E2E8F0;
+        background: linear-gradient(180deg, #FEFCE8 0%, #FFF7ED 30%, #FDF2F8 70%, #EFF6FF 100%);
+        border-right: 1px solid rgba(0,0,0,0.06);
     }
     section[data-testid="stSidebar"] .stMarkdown h3 {
-        color: #0F172A; font-size: 0.8rem; font-weight: 700;
+        color: #6D28D9; font-size: 0.78rem; font-weight: 700;
         text-transform: uppercase; letter-spacing: 0.06em;
     }
 
     .sidebar-brand {
-        padding: 0.5rem 0 1rem 0; margin-bottom: 0.5rem;
-        border-bottom: 1px solid #F1F5F9; text-align: center;
+        padding: 0.75rem 0 1.25rem 0; margin-bottom: 0.5rem;
+        border-bottom: 2px solid transparent;
+        border-image: linear-gradient(90deg, #7C3AED, #2563EB, #0891B2, #059669) 1;
+        text-align: center;
     }
+    .sidebar-brand .brand-icon { font-size: 1.5rem; margin-bottom: 0.25rem; }
     .sidebar-brand .brand-name {
-        font-size: 0.75rem; font-weight: 700; color: #0F172A;
+        font-size: 0.8rem; font-weight: 700;
+        font-family: 'Space Grotesk', sans-serif;
+        background: linear-gradient(135deg, #7C3AED, #2563EB);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        background-clip: text;
         text-transform: uppercase; letter-spacing: 0.08em;
     }
     .sidebar-brand .brand-sub {
-        font-size: 0.65rem; color: #94A3B8; margin-top: 0.15rem;
+        font-size: 0.65rem; color: #64748B; margin-top: 0.15rem;
     }
 
     /* ── Metrics ─────────────────────────────────────────────────── */
     [data-testid="stMetric"] {
-        background: white; border-radius: 10px; padding: 1rem;
-        border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        background: rgba(255,255,255,0.8); backdrop-filter: blur(8px);
+        border-radius: 14px; padding: 1rem;
+        border: 1px solid rgba(255,255,255,0.6);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
     }
     [data-testid="stMetricLabel"] {
-        font-size: 0.75rem !important; font-weight: 600 !important;
-        text-transform: uppercase; letter-spacing: 0.04em;
-        color: #64748B !important;
+        font-size: 0.72rem !important; font-weight: 700 !important;
+        text-transform: uppercase; letter-spacing: 0.05em;
+        color: #7C3AED !important;
     }
     [data-testid="stMetricValue"] {
-        font-weight: 800 !important; color: #0F172A !important;
+        font-weight: 800 !important;
+        background: linear-gradient(135deg, #7C3AED, #2563EB) !important;
+        -webkit-background-clip: text !important; -webkit-text-fill-color: transparent !important;
+        background-clip: text !important;
     }
 
     /* ── Hide Streamlit chrome ───────────────────────────────────── */
@@ -171,26 +202,47 @@ st.markdown("""
     header[data-testid="stHeader"] {background: transparent;}
 
     /* ── Steps ───────────────────────────────────────────────────── */
+    @keyframes step-pulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(124,58,237,0.3); }
+        50% { box-shadow: 0 0 0 6px rgba(124,58,237,0); }
+    }
     .step-num {
         display: inline-flex; align-items: center; justify-content: center;
-        background: #2563EB; color: white; border-radius: 50%;
-        width: 32px; height: 32px; font-weight: 700; font-size: 0.9rem;
-        margin-right: 12px; flex-shrink: 0;
+        background: linear-gradient(135deg, #7C3AED, #2563EB); color: white;
+        border-radius: 50%;
+        width: 36px; height: 36px; font-weight: 700; font-size: 0.95rem;
+        margin-right: 14px; flex-shrink: 0;
+        font-family: 'Space Grotesk', sans-serif;
+    }
+    .step-row:hover .step-num {
+        animation: step-pulse 1.5s ease-in-out infinite;
     }
     .step-row {
-        display: flex; align-items: center; padding: 0.65rem 0;
-        border-bottom: 1px solid #F1F5F9; font-size: 0.92rem;
-        color: #334155; line-height: 1.5;
+        display: flex; align-items: center; padding: 0.75rem 0.5rem;
+        border-bottom: 1px solid rgba(124,58,237,0.06); font-size: 0.92rem;
+        color: #334155; line-height: 1.55;
+        border-radius: 8px; margin: 2px 0;
+        transition: background 0.2s ease;
     }
+    .step-row:hover { background: rgba(124,58,237,0.03); }
     .step-row:last-child { border-bottom: none; }
-    .step-row strong { color: #0F172A; }
+    .step-row strong { color: #4C1D95; }
 
     /* ── Help boxes ──────────────────────────────────────────────── */
     .help-box {
-        background: #FFF7ED; border: 1px solid #FED7AA; border-radius: 10px;
-        padding: 1.25rem; margin-top: 1rem;
+        background: linear-gradient(135deg, rgba(255,247,237,0.9), rgba(254,243,199,0.7));
+        backdrop-filter: blur(8px);
+        border: 1px solid #FED7AA; border-radius: 14px;
+        padding: 1.25rem 1.35rem; margin-top: 1rem;
+        transition: all 0.2s ease;
     }
-    .help-box h4 { margin: 0 0 0.5rem 0; color: #9A3412; font-size: 0.95rem; }
+    .help-box:hover {
+        box-shadow: 0 4px 16px rgba(217,119,6,0.1);
+        transform: translateY(-1px);
+    }
+    .help-box h4 { margin: 0 0 0.5rem 0; color: #9A3412; font-size: 0.95rem;
+        font-family: 'Space Grotesk', sans-serif;
+    }
     .help-box p, .help-box li { color: #78350F; font-size: 0.85rem; line-height: 1.55; }
 
     /* ── Column reference table ──────────────────────────────────── */
@@ -198,44 +250,115 @@ st.markdown("""
         width: 100%; border-collapse: collapse; margin: 0.75rem 0;
     }
     .column-table th {
-        background: #F1F5F9; padding: 0.5rem 0.75rem; text-align: left;
-        font-size: 0.8rem; color: #475569; border-bottom: 2px solid #E2E8F0;
-        font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
+        background: linear-gradient(135deg, #EDE9FE, #DBEAFE); padding: 0.6rem 0.85rem;
+        text-align: left;
+        font-size: 0.78rem; color: #4C1D95; border-bottom: 2px solid #C4B5FD;
+        font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+        font-family: 'Space Grotesk', sans-serif;
     }
     .column-table td {
-        padding: 0.5rem 0.75rem; border-bottom: 1px solid #F1F5F9;
+        padding: 0.55rem 0.85rem; border-bottom: 1px solid #F1F5F9;
         font-size: 0.85rem; color: #334155;
     }
-    .column-table tr:hover { background: #F8FAFC; }
-    .required { color: #DC2626; font-weight: 600; }
-    .optional { color: #059669; }
+    .column-table tr:hover { background: rgba(124,58,237,0.03); }
+    .required {
+        color: white; font-weight: 700; font-size: 0.72rem;
+        background: linear-gradient(135deg, #DC2626, #E11D48);
+        padding: 0.15rem 0.55rem; border-radius: 10px;
+        text-transform: uppercase; letter-spacing: 0.03em;
+    }
+    .optional {
+        color: white; font-weight: 700; font-size: 0.72rem;
+        background: linear-gradient(135deg, #059669, #0D9488);
+        padding: 0.15rem 0.55rem; border-radius: 10px;
+        text-transform: uppercase; letter-spacing: 0.03em;
+    }
 
     /* ── Section headers ─────────────────────────────────────────── */
     .section-header {
-        font-size: 1.15rem; font-weight: 700; color: #0F172A;
-        margin: 1.5rem 0 0.75rem 0; padding-bottom: 0.4rem;
-        border-bottom: 2px solid #E2E8F0;
+        font-size: 1.2rem; font-weight: 700;
+        font-family: 'Space Grotesk', sans-serif;
+        background: linear-gradient(135deg, #7C3AED, #2563EB);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        background-clip: text;
+        margin: 1.75rem 0 0.85rem 0; padding-bottom: 0.5rem;
+        border-bottom: 2px solid transparent;
+        border-image: linear-gradient(90deg, #7C3AED, #2563EB, transparent) 1;
     }
 
     /* ── Footer ──────────────────────────────────────────────────── */
     .app-footer {
-        text-align: center; padding: 1.5rem 0 0.5rem;
-        border-top: 1px solid #E2E8F0; margin-top: 2rem;
+        text-align: center; padding: 1.75rem 0 0.75rem;
+        border-top: 2px solid transparent;
+        border-image: linear-gradient(90deg, transparent, #7C3AED, #2563EB, #0891B2, transparent) 1;
+        margin-top: 2.5rem;
     }
     .app-footer p {
         font-size: 0.75rem; color: #94A3B8; margin: 0.15rem 0;
     }
     .app-footer .footer-label {
-        font-weight: 600; color: #64748B; text-transform: uppercase;
-        letter-spacing: 0.06em; font-size: 0.65rem;
+        font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.08em; font-size: 0.65rem;
+        background: linear-gradient(135deg, #7C3AED, #2563EB);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        background-clip: text;
     }
 
     /* ── Export section ───────────────────────────────────────────── */
     .export-header {
-        font-size: 0.85rem; font-weight: 700; color: #475569;
+        font-size: 0.85rem; font-weight: 700; color: #6D28D9;
         text-transform: uppercase; letter-spacing: 0.05em;
         margin-bottom: 0.5rem; padding-top: 0.5rem;
+        font-family: 'Space Grotesk', sans-serif;
     }
+
+    /* ── Welcome hero ────────────────────────────────────────────── */
+    .welcome-hero {
+        text-align: center; padding: 1.5rem 1rem 0.5rem;
+    }
+    .welcome-hero .hero-emoji {
+        font-size: 3rem; margin-bottom: 0.5rem;
+        animation: blob-float 4s ease-in-out infinite;
+        display: inline-block;
+    }
+    .welcome-hero h2 {
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: 1.5rem; font-weight: 700; margin: 0;
+        background: linear-gradient(135deg, #7C3AED 0%, #2563EB 50%, #0891B2 100%);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    .welcome-hero p {
+        color: #64748B; font-size: 0.92rem; margin: 0.35rem 0 0 0;
+    }
+
+    /* ── Stat pills on viz page ──────────────────────────────────── */
+    .stat-ribbon {
+        display: flex; gap: 0.75rem; flex-wrap: wrap;
+        margin-bottom: 0.5rem;
+    }
+    .stat-pill {
+        display: inline-flex; align-items: center; gap: 0.4rem;
+        padding: 0.4rem 0.9rem; border-radius: 20px;
+        font-size: 0.82rem; font-weight: 600;
+        backdrop-filter: blur(8px);
+    }
+    .stat-pill .pill-icon { font-size: 1rem; }
+    .stat-pill .pill-val { font-family: 'Space Grotesk', sans-serif; font-weight: 700; }
+
+    /* ── Quick-start card ────────────────────────────────────────── */
+    .qs-card {
+        background: linear-gradient(135deg, #EDE9FE 0%, #DBEAFE 50%, #D1FAE5 100%);
+        border-radius: 16px; padding: 1.5rem 1.75rem;
+        border: 1px solid rgba(124,58,237,0.15);
+        margin-bottom: 1rem;
+        box-shadow: 0 4px 16px rgba(124,58,237,0.08);
+    }
+    .qs-card h3 {
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: 1.1rem; font-weight: 700; color: #4C1D95; margin: 0 0 0.35rem 0;
+    }
+    .qs-card p { color: #475569; font-size: 0.88rem; margin: 0; line-height: 1.5; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -254,10 +377,10 @@ if "load_error" not in st.session_state:
 # ── Header ───────────────────────────────────────────────────────────────────
 st.markdown(f"""
 <div class="main-header">
-    <div class="version-badge">{APP_VERSION}</div>
+    <div class="version-badge">v{APP_VERSION}</div>
     <div class="header-label">Transformation Office</div>
     <h1>Block & Gantt Creator Tool</h1>
-    <p class="subtitle">Generate presentation-ready project visualizations from a simple spreadsheet</p>
+    <p class="subtitle">Turn boring spreadsheets into stunning project visuals — in seconds, not hours</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -266,6 +389,7 @@ st.markdown(f"""
 with st.sidebar:
     st.markdown("""
     <div class="sidebar-brand">
+        <div class="brand-icon">&#x1F3A8;</div>
         <div class="brand-name">Transformation Office</div>
         <div class="brand-sub">Block & Gantt Creator Tool</div>
     </div>
@@ -365,9 +489,12 @@ with st.sidebar:
     st.divider()
     st.markdown(f"""
     <div style="text-align: center; padding: 0.25rem 0;">
-        <div style="font-size: 0.6rem; color: #94A3B8; text-transform: uppercase;
-             letter-spacing: 0.08em; font-weight: 600;">Version</div>
-        <div style="font-size: 0.7rem; color: #64748B; font-weight: 500;">{APP_VERSION}</div>
+        <div style="font-size: 0.6rem; text-transform: uppercase;
+             letter-spacing: 0.08em; font-weight: 700;
+             background: linear-gradient(135deg, #7C3AED, #2563EB);
+             -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+             background-clip: text;">Version</div>
+        <div style="font-size: 0.7rem; color: #64748B; font-weight: 600;">v{APP_VERSION}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -379,84 +506,88 @@ with st.sidebar:
 def show_homepage():
     """Landing page with clear instructions and troubleshooting."""
 
+    # Welcome hero
+    st.markdown("""
+    <div class="welcome-hero">
+        <div class="hero-emoji">&#x2728;</div>
+        <h2>Welcome! Let's build something beautiful.</h2>
+        <p>Upload a spreadsheet, pick your colors, and watch the magic happen.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("")
+
     # Feature cards
     col1, col2, col3 = st.columns(3)
 
     with col1:
         st.markdown("""
         <div class="card">
-            <div class="feature-icon" style="background: #EFF6FF;">
-                <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#2563EB" stroke-width="2">
-                    <path d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7"/>
-                </svg>
+            <div class="feature-icon" style="background: linear-gradient(135deg, #EDE9FE, #DBEAFE);">
+                <span style="font-size: 1.5rem;">&#x1F4CB;</span>
             </div>
-            <h3>Simple Input</h3>
-            <p>Just <strong>3 columns</strong> needed: Title, Start Date, and End Date.
-            Add Category to group by workstream. The tool handles the rest.</p>
+            <h3>Dead-Simple Input</h3>
+            <p>Just <strong>3 columns</strong> — Title, Start Date, End Date — and you're off to the races.
+            Add Category for color-coded workstreams. We handle the heavy lifting.</p>
         </div>
         """, unsafe_allow_html=True)
 
     with col2:
         st.markdown("""
         <div class="card">
-            <div class="feature-icon" style="background: #F0FDF4;">
-                <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#059669" stroke-width="2">
-                    <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
-                    <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
-                </svg>
+            <div class="feature-icon" style="background: linear-gradient(135deg, #D1FAE5, #A7F3D0);">
+                <span style="font-size: 1.5rem;">&#x1F3A8;</span>
             </div>
-            <h3>Two Visualization Modes</h3>
-            <p><strong>Gantt Chart</strong> — swim lanes showing each workstream over time.<br>
-            <strong>Block Diagram</strong> — all items packed into one slide showing parallel workload.</p>
+            <h3>Two Ways to Visualize</h3>
+            <p><strong>Gantt Chart</strong> — swim lanes that show every workstream over time.<br>
+            <strong>Block Diagram</strong> — a packed, bird's-eye view of your entire portfolio on one slide.</p>
         </div>
         """, unsafe_allow_html=True)
 
     with col3:
         st.markdown("""
         <div class="card">
-            <div class="feature-icon" style="background: #FEF3C7;">
-                <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#D97706" stroke-width="2">
-                    <path d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                </svg>
+            <div class="feature-icon" style="background: linear-gradient(135deg, #FEF3C7, #FDE68A);">
+                <span style="font-size: 1.5rem;">&#x1F680;</span>
             </div>
-            <h3>Presentation-Ready Export</h3>
-            <p>Download as <strong>PowerPoint</strong> (fully editable shapes), <strong>PDF</strong> (vector quality),
-            or <strong>PNG</strong> (high-res image). Ready for leadership decks.</p>
+            <h3>Export & Impress</h3>
+            <p>Download as <strong>PowerPoint</strong> (fully editable shapes), <strong>PDF</strong> (crisp vectors),
+            or <strong>PNG</strong> (high-res). Ready to drop into your next leadership deck.</p>
         </div>
         """, unsafe_allow_html=True)
 
     st.markdown("")
 
     # ── Step-by-step guide ────────────────────────────────────────────────
-    st.markdown('<div class="section-header">How It Works</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">Four Steps to Stunning Charts</div>', unsafe_allow_html=True)
     st.markdown("""
     <div class="card">
         <div class="step-row">
             <span class="step-num">1</span>
             <div>
-                <strong>Download the template</strong> — Click "Download Excel Template" in the sidebar.
-                It comes pre-filled with sample data so you can see the expected format.
+                <strong>Grab the template</strong> — Hit "Download Excel Template" in the sidebar.
+                It's pre-loaded with sample data so you can see exactly what's expected.
             </div>
         </div>
         <div class="step-row">
             <span class="step-num">2</span>
             <div>
-                <strong>Add your data</strong> — Open the template in Excel or Google Sheets.
-                Replace the sample rows with your own initiatives. Only Title, Start Date, and End Date are required.
+                <strong>Drop in your data</strong> — Open it in Excel or Google Sheets and swap the samples
+                for your real initiatives. Three columns is all you need to get started.
             </div>
         </div>
         <div class="step-row">
             <span class="step-num">3</span>
             <div>
-                <strong>Upload your file</strong> — Drag your .xlsx file into the uploader in the sidebar,
-                or click "Browse files." The tool instantly reads and validates your data.
+                <strong>Upload & go</strong> — Drag your .xlsx into the sidebar uploader. The tool reads,
+                validates, and previews your data instantly. No waiting around.
             </div>
         </div>
         <div class="step-row">
             <span class="step-num">4</span>
             <div>
-                <strong>Customize & export</strong> — Select your color palette, adjust the date range,
-                then download your chart as PowerPoint, PDF, or PNG.
+                <strong>Make it yours</strong> — Pick a palette, tweak the date range, then download your
+                chart as PowerPoint, PDF, or PNG. Done!
             </div>
         </div>
     </div>
@@ -465,12 +596,12 @@ def show_homepage():
     st.markdown("")
 
     # ── Excel format reference ────────────────────────────────────────────
-    st.markdown('<div class="section-header">Excel Format Reference</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">What Goes in Your Spreadsheet</div>', unsafe_allow_html=True)
     st.markdown("""
     <div class="card">
         <p style="margin-bottom: 0.75rem; color: #475569; font-size: 0.88rem;">
-            Your Excel file needs one sheet with the following columns. Column names are flexible &mdash;
-            for example, "Name" works in place of "Title", or "Team" in place of "Category".
+            One sheet, a few columns, endless possibilities. Column names are flexible &mdash;
+            "Name" works in place of "Title", "Team" instead of "Category" &mdash; we'll figure it out.
         </p>
         <table class="column-table">
             <thead>
@@ -538,8 +669,13 @@ def show_homepage():
     st.markdown("")
 
     # ── Try sample data ──────────────────────────────────────────────────
-    st.markdown('<div class="section-header">Quick Start</div>', unsafe_allow_html=True)
-    st.markdown("Don't have a file ready? Load the built-in sample data to explore the tool:")
+    st.markdown('<div class="section-header">No Spreadsheet? No Problem!</div>', unsafe_allow_html=True)
+    st.markdown("""
+    <div class="qs-card">
+        <h3>&#x26A1; Try it right now</h3>
+        <p>Don't have a file handy? Load our built-in sample data with 25 initiatives across 6 workstreams and see the tool in action.</p>
+    </div>
+    """, unsafe_allow_html=True)
     if st.button("Load Sample Data", type="primary", use_container_width=False):
         try:
             sample_bytes = create_template_bytes()
@@ -558,7 +694,7 @@ def show_homepage():
     st.markdown("")
 
     # ── Troubleshooting ──────────────────────────────────────────────────
-    st.markdown('<div class="section-header">Troubleshooting</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">Something Not Working? We\'ve Got You.</div>', unsafe_allow_html=True)
     st.markdown("""
     <div class="help-box">
         <h4>File won't upload?</h4>
@@ -610,8 +746,8 @@ def show_homepage():
     st.markdown(f"""
     <div class="app-footer">
         <p class="footer-label">Transformation Office</p>
-        <p>Block & Gantt Creator Tool &middot; {APP_VERSION}</p>
-        <p>For internal use. Please direct feedback to the Transformation Office team.</p>
+        <p>Block & Gantt Creator Tool &middot; v{APP_VERSION}</p>
+        <p>Made with care for the people who make transformation happen.</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -621,17 +757,40 @@ def show_visualizations():
     items = st.session_state["items"]
     config = st.session_state["config"]
 
-    # Quick stats
+    # Quick stats — colorful pills
     all_categories = list(set(it.category for it in items))
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Work Items", len(items))
-    col2.metric("Categories", len(all_categories))
     min_date = min(it.start_date for it in items)
     max_date = max(it.end_date for it in items)
     span_months = max(1, (max_date - min_date).days // 30)
-    col3.metric("Timeline", f"{span_months} months")
     in_progress_count = sum(1 for it in items if it.status == "in_progress")
-    col4.metric("In Progress", in_progress_count)
+    done_count = sum(1 for it in items if it.status == "done")
+    milestones = sum(1 for it in items if it.is_milestone)
+
+    st.markdown(f"""
+    <div class="stat-ribbon">
+        <span class="stat-pill" style="background: linear-gradient(135deg, #EDE9FE, #DDD6FE); color: #6D28D9;">
+            <span class="pill-icon">&#x1F4CA;</span>
+            <span class="pill-val">{len(items)}</span> items
+        </span>
+        <span class="stat-pill" style="background: linear-gradient(135deg, #DBEAFE, #BFDBFE); color: #1D4ED8;">
+            <span class="pill-icon">&#x1F3AF;</span>
+            <span class="pill-val">{len(all_categories)}</span> categories
+        </span>
+        <span class="stat-pill" style="background: linear-gradient(135deg, #D1FAE5, #A7F3D0); color: #047857;">
+            <span class="pill-icon">&#x1F552;</span>
+            <span class="pill-val">{span_months}</span> months
+        </span>
+        <span class="stat-pill" style="background: linear-gradient(135deg, #FEF3C7, #FDE68A); color: #B45309;">
+            <span class="pill-icon">&#x1F525;</span>
+            <span class="pill-val">{in_progress_count}</span> in progress
+        </span>
+        <span class="stat-pill" style="background: linear-gradient(135deg, #D1FAE5, #BBF7D0); color: #15803D;">
+            <span class="pill-icon">&#x2705;</span>
+            <span class="pill-val">{done_count}</span> done
+        </span>
+        {"<span class='stat-pill' style='background: linear-gradient(135deg, #FCE7F3, #FBCFE8); color: #BE185D;'><span class='pill-icon'>&#x1F48E;</span><span class='pill-val'>" + str(milestones) + "</span> milestones</span>" if milestones > 0 else ""}
+    </div>
+    """, unsafe_allow_html=True)
 
     # Clear data button
     st.markdown("")
@@ -645,15 +804,15 @@ def show_visualizations():
 
     # Tabs
     tab_gantt, tab_block, tab_data = st.tabs([
-        "Gantt Chart",
-        "Block Diagram",
-        "Data Preview",
+        "Gantt Chart  \u2003",
+        "Block Diagram  \u2003",
+        "Data Preview  \u2003",
     ])
 
     # ── GANTT CHART TAB ──────────────────────────────────────────────────
     with tab_gantt:
         st.markdown("#### Swim Lane Gantt Chart")
-        st.caption("Each category gets its own swim lane. Tasks are arranged to avoid overlaps within a lane.")
+        st.caption("Every category gets its own lane. Tasks stack smartly to avoid collisions. Hover over lanes to follow the flow.")
 
         try:
             with st.spinner("Rendering Gantt chart..."):
@@ -695,7 +854,7 @@ def show_visualizations():
     # ── BLOCK DIAGRAM TAB ────────────────────────────────────────────────
     with tab_block:
         st.markdown("#### Space-Filling Block Diagram")
-        st.caption("All work items packed into a single slide showing parallel workload. Ideal for executive presentations.")
+        st.caption("Your entire portfolio packed into one gorgeous slide. Perfect for the exec who wants the big picture at a glance.")
 
         aspect_ratio = st.selectbox(
             "Slide Aspect Ratio",
@@ -791,7 +950,8 @@ def show_visualizations():
     st.markdown(f"""
     <div class="app-footer">
         <p class="footer-label">Transformation Office</p>
-        <p>Block & Gantt Creator Tool &middot; {APP_VERSION}</p>
+        <p>Block & Gantt Creator Tool &middot; v{APP_VERSION}</p>
+        <p>Made with care for the people who make transformation happen.</p>
     </div>
     """, unsafe_allow_html=True)
 
