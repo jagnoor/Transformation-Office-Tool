@@ -39,38 +39,12 @@ class BlockRect:
     row_bottom: int    # ending row index (inclusive)
 
 
-def _resolve_font(preferred: str = "Arial") -> str:
-    import matplotlib.font_manager as fm
-    available = {f.name for f in fm.fontManager.ttflist}
-    for candidate in [preferred, "Arial", "Helvetica Neue", "Helvetica", "Calibri", "DejaVu Sans"]:
-        if candidate in available:
-            return candidate
-    return "DejaVu Sans"
-
-
-def _lighten_color(hex_color: str, factor: float = 0.85) -> str:
-    hex_color = hex_color.lstrip("#")
-    r, g, b = int(hex_color[:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
-    r = int(r + (255 - r) * factor)
-    g = int(g + (255 - g) * factor)
-    b = int(b + (255 - b) * factor)
-    return f"#{r:02x}{g:02x}{b:02x}"
-
-
-def _darken_color(hex_color: str, factor: float = 0.2) -> str:
-    hex_color = hex_color.lstrip("#")
-    r, g, b = int(hex_color[:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
-    r = int(r * (1 - factor))
-    g = int(g * (1 - factor))
-    b = int(b * (1 - factor))
-    return f"#{r:02x}{g:02x}{b:02x}"
-
-
-def _text_color_for_bg(hex_color: str) -> str:
-    hex_color = hex_color.lstrip("#")
-    r, g, b = int(hex_color[:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
-    luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-    return "#FFFFFF" if luminance < 0.5 else "#1E293B"
+from utils import (
+    lighten_color as _lighten_color,
+    darken_color as _darken_color,
+    text_color_for_bg as _text_color_for_bg,
+    resolve_font as _resolve_font,
+)
 
 
 def _wrap_text(text: str, max_chars_per_line: int) -> str:
@@ -301,7 +275,9 @@ def render_block_diagram(
 ) -> bytes:
     """Render a space-filling block diagram and return PNG bytes."""
     if not items:
-        raise ValueError("No work items to render")
+        raise ValueError(
+            "No work items to render. Load a spreadsheet or click 'Load Sample Data' to get started."
+        )
 
     fig = _render_block_figure(items, config, dpi, slide_aspect)
 
@@ -317,7 +293,9 @@ def render_block_diagram(
 def render_block_pdf(items: List[WorkItem], config: ChartConfig, dpi: int = 300, slide_aspect: str = "16:9") -> bytes:
     """Render block diagram as vector PDF."""
     if not items:
-        raise ValueError("No work items to render")
+        raise ValueError(
+            "No work items to render. Load a spreadsheet or click 'Load Sample Data' to get started."
+        )
 
     fig = _render_block_figure(items, config, dpi, slide_aspect)
     buf = io.BytesIO()

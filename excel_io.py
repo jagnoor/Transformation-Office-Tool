@@ -14,6 +14,9 @@ from models import WorkItem, ChartConfig
 
 # ── Reading Excel ────────────────────────────────────────────────────────────
 
+_DATE_FORMATS = ("%Y-%m-%d", "%m/%d/%Y", "%m-%d-%Y", "%d/%m/%Y", "%m/%d/%y", "%Y/%m/%d")
+
+
 def _parse_date(val) -> date:
     """Parse a date from various formats."""
     if val is None or (isinstance(val, float) and pd.isna(val)):
@@ -23,15 +26,17 @@ def _parse_date(val) -> date:
     if isinstance(val, date):
         return val
     s = str(val).strip()
-    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m-%d-%Y", "%d/%m/%Y", "%m/%d/%y", "%Y/%m/%d"):
+    for fmt in _DATE_FORMATS:
         try:
             return datetime.strptime(s, fmt).date()
         except ValueError:
             continue
-    raise ValueError(f"Cannot parse date: {val}")
+    raise ValueError(
+        f"Cannot parse date '{val}'. Use YYYY-MM-DD, MM/DD/YYYY, or DD/MM/YYYY."
+    )
 
 
-def read_excel(file) -> Tuple[List[WorkItem], ChartConfig]:
+def read_excel(file) -> Tuple[List[WorkItem], ChartConfig, List[str]]:
     """Read work items from an Excel file.
 
     Expects a single sheet with columns:
@@ -258,10 +263,10 @@ def create_template_bytes() -> bytes:
         ("", "• The app auto-detects date ranges — no settings sheet needed"),
         ("", "• Column names are flexible: 'Name' works for 'Title', 'Team' for 'Category', etc."),
         ("", ""),
-        ("Sequencing Diagram:", ""),
-        ("", "• Use the Label column for delivery numbers (e.g., 'Delivery 1', 'Delivery 2')"),
-        ("", "• Use semicolons in Description to create bullet points (e.g., 'Task A; Task B; Task C')"),
-        ("", "• Overlapping date ranges will visually overlap to show capacity constraints"),
+        ("Block Diagram tips:", ""),
+        ("", "• Use the Label column for short identifiers (e.g., 'D1', 'MVP', 'Phase 2')"),
+        ("", "• Descriptions are shown inside blocks when there is enough space"),
+        ("", "• Overlapping date ranges stack vertically to show parallel work"),
     ]
 
     title_font = Font(name="Calibri", bold=True, size=16, color="1E293B")
