@@ -42,6 +42,8 @@ from utils import (
     darken_color as _darken_color,
     text_color_for_bg as _text_color_for_bg,
     resolve_font as _resolve_font,
+    compute_logo_geometry,
+    place_logo,
 )
 
 
@@ -153,6 +155,9 @@ def _render_gantt_figure(
 
     fig = plt.figure(figsize=figsize, dpi=dpi, facecolor=config.background_color)
 
+    # Logo geometry computed up-front so the date-range badge can leave room for it
+    logo_geom = compute_logo_geometry(fig, getattr(config, "logo_bytes", None))
+
     # Grid layout: header | main chart area
     header_h = 0.06
     legend_h = 0.04 if config.show_legend else 0.0
@@ -177,10 +182,11 @@ def _render_gantt_figure(
             fontfamily=font_name, va="center",
         )
 
-    # Date range badge
+    # Date range badge — shifted left to make room for the logo, if present
+    date_range_x = 0.98 if not logo_geom else max(0.5, logo_geom["left"] - 0.02)
     date_range_text = f"{chart_start.strftime('%b %d, %Y')}  →  {chart_end.strftime('%b %d, %Y')}"
     ax_header.text(
-        0.98, 0.5, date_range_text,
+        date_range_x, 0.5, date_range_text,
         fontsize=9, color="#64748B",
         fontfamily=font_name, va="center", ha="right",
     )
@@ -453,6 +459,8 @@ def _render_gantt_figure(
                 ax_legend.text(x_pos + 0.018, 0.6, status_label, fontsize=7.5,
                                color="#334155", va="center", fontfamily=font_name)
                 x_pos += 0.018 + len(status_label) * 0.006 + 0.02
+
+    place_logo(fig, logo_geom)
 
     return fig
 

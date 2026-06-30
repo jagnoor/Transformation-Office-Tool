@@ -3,8 +3,9 @@
 Centralizes color manipulation, contrast calculation, and font resolution so
 each renderer doesn't reimplement them.
 """
+import io
 from functools import lru_cache
-from typing import Tuple
+from typing import Optional, Tuple
 
 import matplotlib.font_manager as fm
 
@@ -73,3 +74,66 @@ def resolve_font(preferred: str = "Arial") -> str:
         if candidate in available:
             return candidate
     return "DejaVu Sans"
+
+
+# ── Logo placement (matplotlib figures) ──────────────────────────────────────
+
+def compute_logo_geometry(
+    fig, logo_bytes: Optional[bytes],
+    max_height_frac: float = 0.05, margin_frac: float = 0.012,
+    max_width_frac: float = 0.18,
+) -> Optional[dict]:
+    """Compute placement for a logo in the top-right corner of a figure.
+
+    Returns a dict with the opened PIL image and the figure-fraction
+    rectangle to draw it in (preserving aspect ratio), or None if
+    logo_bytes is empty or not a readable image.
+    """
+    if not logo_bytes:
+        return None
+    try:
+        from PIL import Image
+        img = Image.open(io.BytesIO(logo_bytes))
+        img.load()
+        img = img.convert("RGBA")
+    except Exception:
+        return None
+
+    fig_w_in, fig_h_in = fig.get_size_inches()
+    img_w_px, img_h_px = img.size
+    if img_w_px <= 0 or img_h_px <= 0 or fig_w_in <= 0 or fig_h_in <= 0:
+        return None
+    aspect = img_w_px / img_h_px
+
+    height_frac = max_height_frac
+    width_frac = height_frac * (fig_h_in / fig_w_in) * aspect
+    if width_frac > max_width_frac:
+        width_frac = max_width_frac
+        height_frac = width_frac * (fig_w_in / fig_h_in) / aspect
+
+    left = 1.0 - margin_frac - width_frac
+    bottom = 1.0 - margin_frac - height_frac
+    return {
+        "img": img,
+        "left": left,
+        "bottom": bottom,
+        "width_frac": width_frac,
+        "height_frac": height_frac,
+    }
+
+
+def place_logo(fig, geometry: Optional[dict]) -> None:
+    """Draw a logo onto a figure using geometry from compute_logo_geometry().
+
+    No-op if geometry is None. Adds the logo as the topmost axes so it
+    renders above all other chart elements.
+    """
+    if not geometry:
+        return
+    ax_logo = fig.add_axes([
+        geometry["left"], geometry["bottom"],
+        geometry["width_frac"], geometry["height_frac"],
+    ])
+    ax_logo.set_zorder(50)
+    ax_logo.imshow(geometry["img"])
+    ax_logo.axis("off")

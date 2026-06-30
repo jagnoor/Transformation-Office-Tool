@@ -44,6 +44,8 @@ from utils import (
     darken_color as _darken_color,
     text_color_for_bg as _text_color_for_bg,
     resolve_font as _resolve_font,
+    compute_logo_geometry,
+    place_logo,
 )
 
 
@@ -340,6 +342,9 @@ def _render_block_figure(items, config, dpi, slide_aspect="16:9"):
 
     fig = plt.figure(figsize=(fig_w, fig_h), dpi=dpi, facecolor=config.background_color)
 
+    # Logo geometry computed up-front so the date-range badge can leave room for it
+    logo_geom = compute_logo_geometry(fig, getattr(config, "logo_bytes", None))
+
     # Layout proportions
     header_top = 0.93
     timeline_top = 0.89
@@ -347,9 +352,10 @@ def _render_block_figure(items, config, dpi, slide_aspect="16:9"):
     content_top = timeline_bot - 0.005
     content_bot = 0.06
     legend_bot = 0.01
+    header_left, header_width = 0.02, 0.96
 
     # ── Header ───────────────────────────────────────────────────────────
-    ax_header = fig.add_axes([0.02, header_top, 0.96, 0.06])
+    ax_header = fig.add_axes([header_left, header_top, header_width, 0.06])
     ax_header.set_xlim(0, 1)
     ax_header.set_ylim(0, 1)
     ax_header.axis("off")
@@ -360,8 +366,14 @@ def _render_block_figure(items, config, dpi, slide_aspect="16:9"):
         ax_header.text(0.0, 0.1, config.subtitle, fontsize=12, color="#475569",
                        fontfamily=font_name, va="center")
 
+    # Date range badge — shifted left (in header-axis data coords) to make
+    # room for the logo, if present. Logo geometry is in figure fractions,
+    # so convert it back into the header axis's own 0..1 data space.
+    date_text_x = 1.0
+    if logo_geom:
+        date_text_x = max(0.4, (logo_geom["left"] - 0.02 - header_left) / header_width)
     date_text = f"{chart_start.strftime('%b %Y')} — {chart_end.strftime('%b %Y')}"
-    ax_header.text(1.0, 0.5, date_text, fontsize=10, color="#64748B",
+    ax_header.text(date_text_x, 0.5, date_text, fontsize=10, color="#64748B",
                    fontfamily=font_name, va="center", ha="right")
 
     # ── Timeline header band ─────────────────────────────────────────────
@@ -619,5 +631,7 @@ def _render_block_figure(items, config, dpi, slide_aspect="16:9"):
                 ax_legend.text(x_pos + 0.022, 0.5, label, fontsize=8, color="#64748B",
                                va="center", ha="left", fontfamily=font_name)
                 x_pos += 0.022 + len(label) * 0.006 + 0.02
+
+    place_logo(fig, logo_geom)
 
     return fig

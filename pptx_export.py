@@ -30,6 +30,40 @@ def _hex_to_rgb(hex_color: str) -> RGBColor:
     return RGBColor(r, g, b)
 
 
+def _add_logo(slide, logo_bytes, slide_w, margin, max_height=Inches(0.45), max_width=Inches(2.2)):
+    """Add a logo image to the top-right corner of the slide.
+
+    Returns the logo's left edge (EMU) so callers can keep other header
+    elements from overlapping it, or None if no logo was added.
+    """
+    if not logo_bytes:
+        return None
+    try:
+        from PIL import Image
+        img = Image.open(io.BytesIO(logo_bytes))
+        img.load()
+        img_w_px, img_h_px = img.size
+    except Exception:
+        return None
+    if img_w_px <= 0 or img_h_px <= 0:
+        return None
+    aspect = img_w_px / img_h_px
+
+    height = max_height
+    width = int(height * aspect)
+    if width > max_width:
+        width = max_width
+        height = int(width / aspect)
+
+    left = int(slide_w - margin - width)
+    top = int(margin)
+    try:
+        slide.shapes.add_picture(io.BytesIO(logo_bytes), left, top, width=width, height=height)
+    except Exception:
+        return None
+    return left
+
+
 # ── Gantt PPTX ───────────────────────────────────────────────────────────────
 
 def _assign_sublanes(items: List[WorkItem]):
@@ -117,8 +151,15 @@ def export_gantt_pptx(items: List[WorkItem], config: ChartConfig) -> bytes:
         p2.font.size = Pt(12)
         p2.font.color.rgb = _hex_to_rgb("#64748B")
 
+    # Logo (top-right) — computed before the date text so it can leave room
+    logo_left = _add_logo(slide, getattr(config, "logo_bytes", None), slide_w, margin)
+
     # Date range text
-    date_box = slide.shapes.add_textbox(Inches(9), Inches(0.3), Inches(4), Inches(0.3))
+    date_box_left = Inches(9)
+    date_box_width = Inches(4)
+    if logo_left is not None:
+        date_box_width = max(Inches(1), int(logo_left) - Inches(0.1) - date_box_left)
+    date_box = slide.shapes.add_textbox(date_box_left, Inches(0.3), date_box_width, Inches(0.3))
     tf3 = date_box.text_frame
     p3 = tf3.paragraphs[0]
     p3.text = f"{chart_start.strftime('%b %d, %Y')}  →  {chart_end.strftime('%b %d, %Y')}"
@@ -311,6 +352,9 @@ def export_block_pptx(items: List[WorkItem], config: ChartConfig) -> bytes:
         p2.text = config.subtitle
         p2.font.size = Pt(12)
         p2.font.color.rgb = _hex_to_rgb("#64748B")
+
+    # Logo (top-right)
+    _add_logo(slide, getattr(config, "logo_bytes", None), slide_w, margin)
 
     # Timeline header
     from block_renderer import _compute_time_columns, _pack_rows, _fill_horizontal_gaps, _fill_vertical_gaps

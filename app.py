@@ -4,7 +4,9 @@ Transformation Office — Block & Gantt Creator Tool.
 Creates presentation-ready Gantt charts and space-filling block diagrams
 from simple Excel input. Exports to PowerPoint, PDF, and PNG.
 """
+import base64
 import io
+import json
 import traceback
 import zipfile
 
@@ -23,7 +25,7 @@ from sample_data import list_dataset_names, get_dataset_meta, get_sample_items
 # ── Constants ────────────────────────────────────────────────────────────────
 APP_NAME = "Block & Gantt Creator"
 APP_FULL_NAME = "Transformation Office — Block & Gantt Creator Tool"
-APP_VERSION = "1.3"
+APP_VERSION = "1.4"
 PALETTE_OPTIONS = list(PALETTES.keys()) + ["Custom"]
 CUSTOM_SWATCH_COUNT = 8
 
@@ -370,6 +372,41 @@ st.markdown("""
         color: #FFFFFF;
         border-color: #222222;
     }
+
+    /* ── Inline chart title/subtitle — borderless until focused, reads as a heading ── */
+    input[placeholder="Chart title"] {
+        font-size: 1.5rem !important;
+        font-weight: 700 !important;
+        color: #222222 !important;
+        border: none !important;
+        border-bottom: 2px solid transparent !important;
+        border-radius: 0 !important;
+        padding: 0.2rem 0 !important;
+        background: transparent !important;
+    }
+    input[placeholder="Chart title"]:hover {
+        border-bottom: 2px solid #EBEBEB !important;
+    }
+    input[placeholder="Chart title"]:focus {
+        border-bottom: 2px solid #FF385C !important;
+        box-shadow: none !important;
+    }
+    input[placeholder="Subtitle (optional)"] {
+        font-size: 1rem !important;
+        color: #717171 !important;
+        border: none !important;
+        border-bottom: 2px solid transparent !important;
+        border-radius: 0 !important;
+        padding: 0.2rem 0 !important;
+        background: transparent !important;
+    }
+    input[placeholder="Subtitle (optional)"]:hover {
+        border-bottom: 2px solid #EBEBEB !important;
+    }
+    input[placeholder="Subtitle (optional)"]:focus {
+        border-bottom: 2px solid #EBEBEB !important;
+        box-shadow: none !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -482,6 +519,37 @@ def _apply_date_preset(preset, items):
     return item_start, item_end
 
 
+CONFIG_JSON_FIELDS = [
+    "title", "subtitle", "palette_name", "custom_palette",
+    "show_today_line", "show_legend", "show_status",
+    "font_family", "background_color", "slide_size",
+]
+
+
+def _config_to_json_bytes(config) -> bytes:
+    """Serialize the reusable parts of a ChartConfig to JSON bytes.
+
+    Excludes per-dataset fields (start_date/end_date) since those depend on
+    the data being visualized. The logo, if present, is embedded as base64
+    so a saved settings file is fully self-contained.
+    """
+    data = {f: getattr(config, f) for f in CONFIG_JSON_FIELDS}
+    if config.logo_bytes:
+        data["logo_base64"] = base64.b64encode(config.logo_bytes).decode("ascii")
+    return json.dumps(data, indent=2).encode("utf-8")
+
+
+def _apply_json_settings(config, json_bytes):
+    """Apply a previously saved settings JSON onto an existing ChartConfig."""
+    data = json.loads(json_bytes.decode("utf-8"))
+    for f in CONFIG_JSON_FIELDS:
+        if f in data:
+            setattr(config, f, data[f])
+    if "logo_base64" in data:
+        config.logo_bytes = base64.b64decode(data["logo_base64"])
+    return config
+
+
 def _build_zip_export(items, config, slide_aspect="16:9"):
     """Bundle every export format into a single zip."""
     buf = io.BytesIO()
@@ -497,6 +565,28 @@ def _build_zip_export(items, config, slide_aspect="16:9"):
         zf.writestr("data.xlsx", write_excel(items))
     buf.seek(0)
     return buf.getvalue()
+
+
+PREVIEW_SIZE_OPTIONS = {"Fit Width": 100, "100%": 100, "75%": 75, "50%": 50, "25%": 25}
+
+
+def _render_preview_with_zoom(image_bytes: bytes, key: str):
+    """Show a chart preview with a size control so users can see how it
+    will look scaled down (e.g. as it would appear in a slide thumbnail)
+    without needing to export first.
+    """
+    size_label = st.radio(
+        "Preview size", options=list(PREVIEW_SIZE_OPTIONS.keys()),
+        index=0, horizontal=True, key=f"preview_size_{key}",
+        label_visibility="collapsed",
+    )
+    pct = PREVIEW_SIZE_OPTIONS[size_label]
+    if pct >= 100:
+        st.image(image_bytes, use_container_width=True)
+    else:
+        preview_col, _spacer = st.columns([pct, 100 - pct])
+        with preview_col:
+            st.image(image_bytes, use_container_width=True)
 
 
 # ── Session state init ───────────────────────────────────────────────────────
@@ -583,10 +673,9 @@ with st.sidebar:
 
     if st.session_state["items"] is not None:
         st.markdown("### Chart Settings")
+        st.caption("Edit the title and subtitle directly above the chart.")
 
         config = st.session_state["config"]
-        config.title = st.text_input("Title", value=config.title)
-        config.subtitle = st.text_input("Subtitle", value=config.subtitle)
 
         config.palette_name = st.selectbox(
             "Color Palette",
@@ -683,6 +772,44 @@ with st.sidebar:
                 new_start, new_end = new_end, new_start
             config.start_date = new_start
             config.end_date = new_end
+
+        st.divider()
+        with st.expander("Branding", expanded=False):
+            st.caption("Add a logo to the top-right corner of every export.")
+            logo_file = st.file_uploader(
+                "Logo (PNG or JPG, under 2 MB)", type=["png", "jpg", "jpeg"],
+                key="logo_uploader",
+            )
+            if logo_file is not None:
+                logo_bytes = logo_file.getvalue()
+                if len(logo_bytes) > 2 * 1024 * 1024:
+                    st.error("Logo file is too large — please use an image under 2 MB.")
+                else:
+                    config.logo_bytes = logo_bytes
+            if config.logo_bytes:
+                st.image(config.logo_bytes, width=120)
+                if st.button("Remove logo", use_container_width=True):
+                    config.logo_bytes = None
+                    st.rerun()
+
+        with st.expander("Save / Load Settings", expanded=False):
+            st.caption("Save your title, palette, and toggles to reuse on another dataset.")
+            st.download_button(
+                "Save Settings (.json)",
+                data=_config_to_json_bytes(config),
+                file_name="chart_settings.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+            settings_file = st.file_uploader(
+                "Load Settings", type=["json"], key="settings_uploader",
+            )
+            if settings_file is not None:
+                try:
+                    config = _apply_json_settings(config, settings_file.getvalue())
+                    st.success("Settings loaded.")
+                except Exception as e:
+                    st.error(f"Couldn't load settings file: {e}")
 
         st.session_state["config"] = config
 
@@ -944,6 +1071,21 @@ def show_visualizations():
     items = st.session_state["items"]
     config = st.session_state["config"]
 
+    # ── Inline title / subtitle editing — right above the chart, not buried
+    # in the sidebar, so renaming a chart doesn't require context-switching ──
+    title_col, subtitle_col = st.columns([1, 1])
+    with title_col:
+        config.title = st.text_input(
+            "Chart Title", value=config.title, key="canvas_title",
+            label_visibility="collapsed", placeholder="Chart title",
+        )
+    with subtitle_col:
+        config.subtitle = st.text_input(
+            "Chart Subtitle", value=config.subtitle, key="canvas_subtitle",
+            label_visibility="collapsed", placeholder="Subtitle (optional)",
+        )
+    st.session_state["config"] = config
+
     # ── Filters — apply to charts/exports only; editing always sees all items ──
     all_categories = sorted(set(it.category for it in items))
     all_statuses = sorted(set(it.status for it in items))
@@ -1083,7 +1225,7 @@ def show_visualizations():
             try:
                 with st.spinner("Rendering Gantt chart..."):
                     gantt_preview = render_gantt(display_items, config, dpi=150)
-                st.image(gantt_preview, use_container_width=True)
+                _render_preview_with_zoom(gantt_preview, key="gantt")
 
                 st.markdown("---")
                 st.markdown('<div class="export-header">Export</div>', unsafe_allow_html=True)
@@ -1135,7 +1277,7 @@ def show_visualizations():
             try:
                 with st.spinner("Rendering block diagram..."):
                     block_preview = render_block_diagram(display_items, config, dpi=150, slide_aspect=aspect_ratio)
-                st.image(block_preview, use_container_width=True)
+                _render_preview_with_zoom(block_preview, key="block")
 
                 st.markdown("---")
                 st.markdown('<div class="export-header">Export</div>', unsafe_allow_html=True)
