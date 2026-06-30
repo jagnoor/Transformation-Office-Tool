@@ -298,3 +298,81 @@ def create_template_bytes() -> bytes:
 def create_sample_bytes() -> bytes:
     """Create a sample Excel with realistic data (same as template's sample data)."""
     return create_template_bytes()
+
+
+def write_excel(items: List[WorkItem]) -> bytes:
+    """Write a list of WorkItems to an Excel file in the same format as the template.
+
+    Used to round-trip data after in-app editing.
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Roadmap"
+
+    header_font = Font(name="Calibri", bold=True, size=12, color="FFFFFF")
+    header_fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
+    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    thin_border = Border(
+        left=Side(style="thin", color="D1D5DB"),
+        right=Side(style="thin", color="D1D5DB"),
+        top=Side(style="thin", color="D1D5DB"),
+        bottom=Side(style="thin", color="D1D5DB"),
+    )
+
+    headers = [
+        ("Title", 35),
+        ("Start Date", 15),
+        ("End Date", 15),
+        ("Category", 20),
+        ("Description", 40),
+        ("Status", 15),
+        ("Owner", 20),
+        ("Label", 15),
+    ]
+
+    for col_idx, (name, width) in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=name)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
+        cell.border = thin_border
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+    last_row = max(2, len(items) + 1)
+    status_dv = DataValidation(
+        type="list",
+        formula1='"planned,in_progress,done,at_risk"',
+        allow_blank=True,
+    )
+    ws.add_data_validation(status_dv)
+    status_dv.add(f"F2:F{last_row}")
+
+    data_font = Font(name="Calibri", size=11)
+    data_align = Alignment(vertical="center", wrap_text=False)
+    alt_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+
+    for row_idx, item in enumerate(items, 2):
+        row_data = [
+            item.title,
+            item.start_date,
+            item.end_date,
+            item.category,
+            item.description,
+            item.status,
+            item.owner,
+            item.label,
+        ]
+        for col_idx, value in enumerate(row_data, 1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.font = data_font
+            cell.alignment = data_align
+            cell.border = thin_border
+            if row_idx % 2 == 0:
+                cell.fill = alt_fill
+
+    ws.freeze_panes = "A2"
+    ws.sheet_properties.tabColor = "2563EB"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()

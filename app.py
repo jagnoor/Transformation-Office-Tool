@@ -6,13 +6,14 @@ from simple Excel input. Exports to PowerPoint, PDF, and PNG.
 """
 import io
 import traceback
+import zipfile
 
 import pandas as pd
 import streamlit as st
 from datetime import date, timedelta
 
 from models import WorkItem, ChartConfig, PALETTES, DEFAULT_PALETTE, STATUS_LABELS
-from excel_io import read_excel, create_template_bytes
+from excel_io import read_excel, create_template_bytes, write_excel
 from gantt_renderer import render_gantt, render_gantt_pdf
 from block_renderer import render_block_diagram, render_block_pdf
 from pptx_export import export_gantt_pptx, export_block_pptx
@@ -21,7 +22,7 @@ from pptx_export import export_gantt_pptx, export_block_pptx
 # ── Constants ────────────────────────────────────────────────────────────────
 APP_NAME = "Block & Gantt Creator"
 APP_FULL_NAME = "Transformation Office — Block & Gantt Creator Tool"
-APP_VERSION = "1.1"
+APP_VERSION = "1.2"
 
 
 # ── Page config ──────────────────────────────────────────────────────────────
@@ -351,8 +352,148 @@ st.markdown("""
     [data-baseweb="select"] > div {
         border-radius: 8px !important;
     }
+
+    /* ── Compact preset button row ──────────────────────────────── */
+    .preset-row .stButton > button {
+        padding: 0.3rem 0.7rem;
+        font-size: 0.78rem;
+        font-weight: 500;
+        border: 1px solid #EBEBEB;
+        background: #F7F7F7;
+        color: #484848;
+    }
+    .preset-row .stButton > button:hover {
+        background: #222222;
+        color: #FFFFFF;
+        border-color: #222222;
+    }
 </style>
 """, unsafe_allow_html=True)
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+LABEL_TO_STATUS = {v: k for k, v in STATUS_LABELS.items()}
+
+
+def _items_to_df(items):
+    """Convert WorkItems to a DataFrame for st.data_editor."""
+    return pd.DataFrame([
+        {
+            "Title": it.title,
+            "Start": it.start_date,
+            "End": it.end_date,
+            "Category": it.category,
+            "Description": it.description,
+            "Status": STATUS_LABELS.get(it.status, "Planned"),
+            "Owner": it.owner,
+            "Label": it.label,
+        }
+        for it in items
+    ])
+
+
+def _df_to_items(df):
+    """Convert an edited DataFrame back to a WorkItem list.
+
+    Returns (items, warnings). Rows with missing/invalid required fields
+    are skipped with a warning.
+    """
+    items = []
+    warnings = []
+    for idx, row in df.iterrows():
+        title = str(row.get("Title", "") or "").strip()
+        if not title or title.lower() == "nan":
+            continue
+
+        start = row.get("Start")
+        end = row.get("End")
+        if pd.isna(start) or pd.isna(end):
+            warnings.append(f"Row {idx + 1} ('{title}'): missing date — skipped")
+            continue
+
+        if hasattr(start, "date") and not isinstance(start, date):
+            start = start.date()
+        if hasattr(end, "date") and not isinstance(end, date):
+            end = end.date()
+
+        if end < start:
+            start, end = end, start
+
+        status_label = str(row.get("Status", "Planned") or "Planned")
+        status = LABEL_TO_STATUS.get(status_label, "planned")
+
+        items.append(WorkItem(
+            title=title,
+            start_date=start,
+            end_date=end,
+            category=str(row.get("Category", "General") or "General").strip() or "General",
+            description=str(row.get("Description", "") or "").strip(),
+            status=status,
+            owner=str(row.get("Owner", "") or "").strip(),
+            label=str(row.get("Label", "") or "").strip(),
+        ))
+    return items, warnings
+
+
+def _items_signature(items):
+    """Hashable summary of items used to detect changes from the editor."""
+    return tuple(
+        (it.title, it.start_date, it.end_date, it.category, it.description,
+         it.status, it.owner, it.label)
+        for it in items
+    )
+
+
+def _quarter_bounds(year, quarter):
+    """Return (start, end) date of the given calendar quarter."""
+    start_month = (quarter - 1) * 3 + 1
+    end_month = start_month + 2
+    if end_month == 12:
+        end = date(year, 12, 31)
+    else:
+        end = date(year, end_month + 1, 1) - timedelta(days=1)
+    return date(year, start_month, 1), end
+
+
+def _apply_date_preset(preset, items):
+    """Compute (start, end) dates for a named preset."""
+    today = date.today()
+    item_start = min(it.start_date for it in items)
+    item_end = max(it.end_date for it in items)
+
+    if preset == "All":
+        return item_start, item_end
+    if preset == "This Year":
+        return date(today.year, 1, 1), date(today.year, 12, 31)
+    if preset == "This Quarter":
+        q = (today.month - 1) // 3 + 1
+        return _quarter_bounds(today.year, q)
+    if preset == "Next 6 Months":
+        new_month = today.month + 6
+        new_year = today.year
+        while new_month > 12:
+            new_month -= 12
+            new_year += 1
+        return today, date(new_year, new_month, min(today.day, 28))
+    return item_start, item_end
+
+
+def _build_zip_export(items, config, slide_aspect="16:9"):
+    """Bundle every export format into a single zip."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("gantt_chart.png", render_gantt(items, config, dpi=300))
+        zf.writestr("gantt_chart.pdf", render_gantt_pdf(items, config, dpi=300))
+        zf.writestr("gantt_chart.pptx", export_gantt_pptx(items, config))
+        zf.writestr("block_diagram.png",
+                    render_block_diagram(items, config, dpi=300, slide_aspect=slide_aspect))
+        zf.writestr("block_diagram.pdf",
+                    render_block_pdf(items, config, dpi=300, slide_aspect=slide_aspect))
+        zf.writestr("block_diagram.pptx", export_block_pptx(items, config))
+        zf.writestr("data.xlsx", write_excel(items))
+    buf.seek(0)
+    return buf.getvalue()
 
 
 # ── Session state init ───────────────────────────────────────────────────────
@@ -470,7 +611,38 @@ with st.sidebar:
 
         st.divider()
         st.markdown("### Date Range")
+
+        # Quick presets
+        st.markdown('<div class="preset-row">', unsafe_allow_html=True)
+        p1, p2, p3, p4 = st.columns(4)
+        preset_clicked = None
+        with p1:
+            if st.button("All", key="preset_all", use_container_width=True):
+                preset_clicked = "All"
+        with p2:
+            if st.button("Year", key="preset_year", use_container_width=True,
+                         help="This calendar year"):
+                preset_clicked = "This Year"
+        with p3:
+            if st.button("Quarter", key="preset_quarter", use_container_width=True,
+                         help="Current calendar quarter"):
+                preset_clicked = "This Quarter"
+        with p4:
+            if st.button("6mo", key="preset_6mo", use_container_width=True,
+                         help="Next 6 months from today"):
+                preset_clicked = "Next 6 Months"
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        if preset_clicked:
+            new_start, new_end = _apply_date_preset(preset_clicked, st.session_state["items"])
+            config.start_date = new_start
+            config.end_date = new_end
+            st.session_state["config"] = config
+            st.rerun()
+
         d_col1, d_col2 = st.columns(2)
+        new_start = config.start_date
+        new_end = config.end_date
         with d_col1:
             if config.start_date:
                 new_start = st.date_input("Start", value=config.start_date)
@@ -775,9 +947,29 @@ def show_visualizations():
     )
     st.markdown(f'<div class="stat-ribbon">{pill_html}</div>', unsafe_allow_html=True)
 
-    # Clear data button — top right
-    with st.columns([6, 1])[1]:
-        if st.button("Clear Data", help="Remove loaded data and return to the home screen"):
+    # Top action row — batch export + clear data
+    action_l, action_mid, action_r = st.columns([4, 2, 1])
+    with action_mid:
+        try:
+            zip_bytes = _build_zip_export(items, config, slide_aspect="16:9")
+            st.download_button(
+                "Download All Formats (.zip)",
+                data=zip_bytes,
+                file_name="transformation_office_export.zip",
+                mime="application/zip",
+                help="One zip with PNG, PDF, PowerPoint, and cleaned Excel data",
+                use_container_width=True,
+            )
+        except Exception as e:
+            st.button(
+                "Download All Formats (.zip)",
+                disabled=True,
+                help=f"Export failed: {e}",
+                use_container_width=True,
+            )
+    with action_r:
+        if st.button("Clear Data", help="Remove loaded data and return to the home screen",
+                     use_container_width=True):
             st.session_state["items"] = None
             st.session_state["config"] = ChartConfig()
             st.session_state["warnings"] = []
@@ -884,44 +1076,87 @@ def show_visualizations():
 
     # ── DATA PREVIEW TAB ─────────────────────────────────────────────────
     with tab_data:
-        st.markdown("#### Loaded Data")
+        st.markdown("#### Edit Data")
+        st.caption(
+            "Edit any cell, add rows with the + button below the table, or delete rows "
+            "by selecting them and pressing Delete. Changes update the charts instantly."
+        )
 
-        df = pd.DataFrame([
-            {
-                "Title": it.title,
-                "Start": it.start_date.strftime("%Y-%m-%d"),
-                "End": it.end_date.strftime("%Y-%m-%d"),
-                "Category": it.category,
-                "Status": STATUS_LABELS.get(it.status, it.status),
-                "Owner": it.owner,
-                "Label": it.label,
-                "Days": it.duration_days,
-            }
-            for it in items
-        ])
-
-        st.dataframe(
-            df,
+        editable_df = _items_to_df(items)
+        edited_df = st.data_editor(
+            editable_df,
             use_container_width=True,
-            height=min(600, 40 + len(df) * 35),
+            num_rows="dynamic",
+            height=min(640, 60 + len(editable_df) * 36),
             column_config={
+                "Title": st.column_config.TextColumn(
+                    "Title", required=True, help="Name of the work item"),
+                "Start": st.column_config.DateColumn(
+                    "Start", required=True, help="When work begins"),
+                "End": st.column_config.DateColumn(
+                    "End", required=True, help="When work is expected to finish"),
+                "Category": st.column_config.TextColumn(
+                    "Category", help="Workstream or team — drives color and lane grouping"),
+                "Description": st.column_config.TextColumn(
+                    "Description", help="Optional short description shown on blocks"),
                 "Status": st.column_config.SelectboxColumn(
+                    "Status",
                     options=list(STATUS_LABELS.values()),
                     required=True,
                 ),
-                "Days": st.column_config.NumberColumn(format="%d days"),
-                "Start": st.column_config.DateColumn(),
-                "End": st.column_config.DateColumn(),
+                "Owner": st.column_config.TextColumn("Owner"),
+                "Label": st.column_config.TextColumn(
+                    "Label", help="Short identifier shown on the block (e.g., D1, MVP)"),
             },
+            key="data_editor",
         )
 
+        new_items, edit_warnings = _df_to_items(edited_df)
+        if _items_signature(new_items) != _items_signature(items):
+            if not new_items:
+                st.warning(
+                    "All rows have been removed. Add at least one item or click "
+                    "**Clear Data** to return to the home page."
+                )
+            else:
+                st.session_state["items"] = new_items
+                if edit_warnings:
+                    st.session_state["warnings"] = edit_warnings
+                st.rerun()
+
+        # Download cleaned data back to Excel
+        dl_col, _spacer = st.columns([1, 3])
+        with dl_col:
+            try:
+                xlsx_bytes = write_excel(items)
+                st.download_button(
+                    "Download as Excel",
+                    data=xlsx_bytes,
+                    file_name="transformation_office_data.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    help="Save your edited data back to a .xlsx file you can share",
+                    use_container_width=True,
+                )
+            except Exception as e:
+                st.error(f"Couldn't generate Excel export: {e}")
+
+        # Summary by category
         st.markdown("#### Summary by Category")
-        summary = df.groupby("Category").agg(
-            Items=("Title", "count"),
-            Earliest=("Start", "min"),
-            Latest=("End", "max"),
-        ).reset_index()
-        st.dataframe(summary, use_container_width=True, hide_index=True)
+        summary_df = pd.DataFrame([
+            {
+                "Category": it.category,
+                "Start": it.start_date.strftime("%Y-%m-%d"),
+                "End": it.end_date.strftime("%Y-%m-%d"),
+            }
+            for it in items
+        ])
+        if not summary_df.empty:
+            summary = summary_df.groupby("Category").agg(
+                Items=("Category", "count"),
+                Earliest=("Start", "min"),
+                Latest=("End", "max"),
+            ).reset_index()
+            st.dataframe(summary, use_container_width=True, hide_index=True)
 
         if st.session_state["warnings"]:
             st.markdown("#### Warnings")
