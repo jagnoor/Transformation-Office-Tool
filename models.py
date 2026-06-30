@@ -1,7 +1,7 @@
 """Data models for the Transformation Office Block & Gantt Creator Tool."""
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Optional
+from typing import List, Optional
 
 
 # ── Modern color palettes ────────────────────────────────────────────────────
@@ -94,9 +94,12 @@ class ChartConfig:
     font_family: str = "Arial"
     background_color: str = "#FFFFFF"
     slide_size: str = "WIDE"  # WIDE (16:9), A4, A3
+    custom_palette: Optional[List[str]] = None  # used when palette_name == "Custom"
 
     @property
     def palette(self):
+        if self.palette_name == "Custom" and self.custom_palette:
+            return self.custom_palette
         return PALETTES.get(self.palette_name, PALETTES[DEFAULT_PALETTE])
 
     def get_category_color(self, category: str, categories: list) -> str:

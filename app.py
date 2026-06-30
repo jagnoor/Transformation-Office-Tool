@@ -17,12 +17,15 @@ from excel_io import read_excel, create_template_bytes, write_excel
 from gantt_renderer import render_gantt, render_gantt_pdf
 from block_renderer import render_block_diagram, render_block_pdf
 from pptx_export import export_gantt_pptx, export_block_pptx
+from sample_data import list_dataset_names, get_dataset_meta, get_sample_items
 
 
 # ── Constants ────────────────────────────────────────────────────────────────
 APP_NAME = "Block & Gantt Creator"
 APP_FULL_NAME = "Transformation Office — Block & Gantt Creator Tool"
-APP_VERSION = "1.2"
+APP_VERSION = "1.3"
+PALETTE_OPTIONS = list(PALETTES.keys()) + ["Custom"]
+CUSTOM_SWATCH_COUNT = 8
 
 
 # ── Page config ──────────────────────────────────────────────────────────────
@@ -587,23 +590,46 @@ with st.sidebar:
 
         config.palette_name = st.selectbox(
             "Color Palette",
-            options=list(PALETTES.keys()),
-            index=list(PALETTES.keys()).index(config.palette_name)
-                if config.palette_name in PALETTES else 0,
-            help="Choose a color scheme for your visualization",
+            options=PALETTE_OPTIONS,
+            index=PALETTE_OPTIONS.index(config.palette_name)
+                if config.palette_name in PALETTE_OPTIONS else 0,
+            help="Choose a color scheme, or pick 'Custom' to set your own colors",
         )
 
-        # Palette preview
-        palette = PALETTES[config.palette_name]
-        n_preview = min(5, len(palette))
-        if n_preview > 0:
-            cols = st.columns(n_preview)
-            for i, col in enumerate(cols):
-                if i < len(palette):
-                    col.color_picker(
-                        f"C{i+1}", value=palette[i], key=f"cp_{i}",
-                        disabled=True, label_visibility="collapsed",
+        if config.palette_name == "Custom":
+            st.caption(
+                f"Set up to {CUSTOM_SWATCH_COUNT} colors. Categories beyond "
+                f"{CUSTOM_SWATCH_COUNT} reuse them in order."
+            )
+            base_colors = list(config.custom_palette or PALETTES[DEFAULT_PALETTE])
+            if len(base_colors) < CUSTOM_SWATCH_COUNT:
+                fallback = PALETTES[DEFAULT_PALETTE]
+                base_colors += [
+                    fallback[i % len(fallback)]
+                    for i in range(len(base_colors), CUSTOM_SWATCH_COUNT)
+                ]
+            cust_cols = st.columns(4)
+            new_colors = []
+            for i in range(CUSTOM_SWATCH_COUNT):
+                with cust_cols[i % 4]:
+                    c = st.color_picker(
+                        f"C{i+1}", value=base_colors[i], key=f"custom_color_{i}",
+                        label_visibility="collapsed",
                     )
+                    new_colors.append(c)
+            config.custom_palette = new_colors
+        else:
+            # Read-only preview of the named palette
+            palette = PALETTES[config.palette_name]
+            n_preview = min(5, len(palette))
+            if n_preview > 0:
+                cols = st.columns(n_preview)
+                for i, col in enumerate(cols):
+                    if i < len(palette):
+                        col.color_picker(
+                            f"C{i+1}", value=palette[i], key=f"cp_{i}",
+                            disabled=True, label_visibility="collapsed",
+                        )
 
         config.show_today_line = st.toggle("Show today line", value=config.show_today_line)
         config.show_status = st.toggle("Show status indicators", value=config.show_status)
@@ -818,27 +844,40 @@ def show_homepage():
 
     # ── Try sample data ──────────────────────────────────────────────────
     st.markdown('<div class="section-header">Try it without a file</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-sub">Pick whichever scenario is closest to your work — each loads instantly.</div>',
+        unsafe_allow_html=True,
+    )
 
-    st.markdown("""
-    <div class="qs-card">
-        <h3>Load sample data</h3>
-        <p>Explore the tool with a 25-item product roadmap across 6 workstreams.</p>
-    </div>
-    """, unsafe_allow_html=True)
-    if st.button("Load Sample Data", type="primary"):
-        try:
-            sample_bytes = create_template_bytes()
-            loaded_items, loaded_config, loaded_warnings = read_excel(io.BytesIO(sample_bytes))
-            loaded_config.title = "Transformation Roadmap 2025"
-            loaded_config.subtitle = "25 initiatives across 6 workstreams"
-            loaded_config.palette_name = "Vibrant"
-            st.session_state["items"] = loaded_items
-            st.session_state["config"] = loaded_config
-            st.session_state["warnings"] = loaded_warnings
-            st.session_state["load_error"] = None
-            st.rerun()
-        except Exception as e:
-            st.error(f"Error loading sample: {e}")
+    dataset_names = list_dataset_names()
+    sample_cols = st.columns(2)
+    for i, dataset_name in enumerate(dataset_names):
+        meta = get_dataset_meta(dataset_name)
+        n_items = len(get_sample_items(dataset_name))
+        with sample_cols[i % 2]:
+            st.markdown(f"""
+            <div class="qs-card">
+                <h3>{dataset_name}</h3>
+                <p>{meta['blurb']} ({n_items} items)</p>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button(f"Load {dataset_name}", key=f"load_sample_{dataset_name}",
+                         use_container_width=True):
+                try:
+                    loaded_items = get_sample_items(dataset_name)
+                    loaded_config = ChartConfig()
+                    loaded_config.title = meta["title"]
+                    loaded_config.subtitle = meta["subtitle"]
+                    loaded_config.palette_name = meta["palette"]
+                    loaded_config.start_date = min(it.start_date for it in loaded_items)
+                    loaded_config.end_date = max(it.end_date for it in loaded_items)
+                    st.session_state["items"] = loaded_items
+                    st.session_state["config"] = loaded_config
+                    st.session_state["warnings"] = []
+                    st.session_state["load_error"] = None
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error loading sample: {e}")
 
     # ── Troubleshooting ──────────────────────────────────────────────────
     st.markdown('<div class="section-header">Troubleshooting</div>', unsafe_allow_html=True)
@@ -905,66 +944,116 @@ def show_visualizations():
     items = st.session_state["items"]
     config = st.session_state["config"]
 
-    # Single-pass stats computation (was 6 separate O(n) passes)
-    categories = set()
-    min_date = items[0].start_date
-    max_date = items[0].end_date
-    in_progress_count = 0
-    done_count = 0
-    at_risk_count = 0
-    milestones = 0
-    for it in items:
-        categories.add(it.category)
-        if it.start_date < min_date:
-            min_date = it.start_date
-        if it.end_date > max_date:
-            max_date = it.end_date
-        if it.status == "in_progress":
-            in_progress_count += 1
-        elif it.status == "done":
-            done_count += 1
-        elif it.status == "at_risk":
-            at_risk_count += 1
-        if it.is_milestone:
-            milestones += 1
-    span_months = max(1, (max_date - min_date).days // 30)
+    # ── Filters — apply to charts/exports only; editing always sees all items ──
+    all_categories = sorted(set(it.category for it in items))
+    all_statuses = sorted(set(it.status for it in items))
+    all_owners = sorted(set(it.owner for it in items if it.owner))
+    # Widget keys are derived from the data shape so stale selections from a
+    # previous dataset never leak in as an invalid default after a reload.
+    filter_key = str(hash((tuple(all_categories), tuple(all_statuses), tuple(all_owners))))
 
-    pills = [
-        ('', len(items), 'items'),
-        ('', len(categories), 'categories'),
-        ('', span_months, 'months'),
-        ('accent', in_progress_count, 'in progress'),
-        ('', done_count, 'done'),
+    with st.expander("Filters", expanded=False):
+        f1, f2, f3 = st.columns(3)
+        with f1:
+            selected_categories = st.multiselect(
+                "Category", options=all_categories, default=all_categories,
+                key=f"filter_cat_{filter_key}",
+            )
+        with f2:
+            selected_statuses = st.multiselect(
+                "Status", options=all_statuses, default=all_statuses,
+                format_func=lambda s: STATUS_LABELS.get(s, s),
+                key=f"filter_status_{filter_key}",
+            )
+        with f3:
+            if all_owners:
+                selected_owners = st.multiselect(
+                    "Owner", options=all_owners, default=all_owners,
+                    key=f"filter_owner_{filter_key}",
+                )
+            else:
+                selected_owners = []
+                st.caption("No owners in this dataset")
+
+    display_items = [
+        it for it in items
+        if it.category in selected_categories
+        and it.status in selected_statuses
+        and (not all_owners or not it.owner or it.owner in selected_owners)
     ]
-    if at_risk_count > 0:
-        pills.append(('accent', at_risk_count, 'at risk'))
-    if milestones > 0:
-        pills.append(('', milestones, 'milestones'))
 
-    pill_html = "".join(
-        f'<span class="stat-pill {cls}"><span class="pill-val">{val}</span> {label}</span>'
-        for cls, val, label in pills
-    )
-    st.markdown(f'<div class="stat-ribbon">{pill_html}</div>', unsafe_allow_html=True)
+    if len(display_items) != len(items):
+        st.caption(f"Showing {len(display_items)} of {len(items)} items — filters are active above.")
+
+    # Single-pass stats computation (was 6 separate O(n) passes)
+    if display_items:
+        categories = set()
+        min_date = display_items[0].start_date
+        max_date = display_items[0].end_date
+        in_progress_count = 0
+        done_count = 0
+        at_risk_count = 0
+        milestones = 0
+        for it in display_items:
+            categories.add(it.category)
+            if it.start_date < min_date:
+                min_date = it.start_date
+            if it.end_date > max_date:
+                max_date = it.end_date
+            if it.status == "in_progress":
+                in_progress_count += 1
+            elif it.status == "done":
+                done_count += 1
+            elif it.status == "at_risk":
+                at_risk_count += 1
+            if it.is_milestone:
+                milestones += 1
+        span_months = max(1, (max_date - min_date).days // 30)
+
+        pills = [
+            ('', len(display_items), 'items'),
+            ('', len(categories), 'categories'),
+            ('', span_months, 'months'),
+            ('accent', in_progress_count, 'in progress'),
+            ('', done_count, 'done'),
+        ]
+        if at_risk_count > 0:
+            pills.append(('accent', at_risk_count, 'at risk'))
+        if milestones > 0:
+            pills.append(('', milestones, 'milestones'))
+
+        pill_html = "".join(
+            f'<span class="stat-pill {cls}"><span class="pill-val">{val}</span> {label}</span>'
+            for cls, val, label in pills
+        )
+        st.markdown(f'<div class="stat-ribbon">{pill_html}</div>', unsafe_allow_html=True)
 
     # Top action row — batch export + clear data
     action_l, action_mid, action_r = st.columns([4, 2, 1])
     with action_mid:
-        try:
-            zip_bytes = _build_zip_export(items, config, slide_aspect="16:9")
-            st.download_button(
-                "Download All Formats (.zip)",
-                data=zip_bytes,
-                file_name="transformation_office_export.zip",
-                mime="application/zip",
-                help="One zip with PNG, PDF, PowerPoint, and cleaned Excel data",
-                use_container_width=True,
-            )
-        except Exception as e:
+        if display_items:
+            try:
+                zip_bytes = _build_zip_export(display_items, config, slide_aspect="16:9")
+                st.download_button(
+                    "Download All Formats (.zip)",
+                    data=zip_bytes,
+                    file_name="transformation_office_export.zip",
+                    mime="application/zip",
+                    help="One zip with PNG, PDF, PowerPoint, and cleaned Excel data",
+                    use_container_width=True,
+                )
+            except Exception as e:
+                st.button(
+                    "Download All Formats (.zip)",
+                    disabled=True,
+                    help=f"Export failed: {e}",
+                    use_container_width=True,
+                )
+        else:
             st.button(
                 "Download All Formats (.zip)",
                 disabled=True,
-                help=f"Export failed: {e}",
+                help="No items match the current filters",
                 use_container_width=True,
             )
     with action_r:
@@ -988,42 +1077,45 @@ def show_visualizations():
         st.markdown("#### Swim Lane Gantt")
         st.caption("Each category gets its own lane. Overlapping tasks stack automatically.")
 
-        try:
-            with st.spinner("Rendering Gantt chart..."):
-                gantt_preview = render_gantt(items, config, dpi=150)
-            st.image(gantt_preview, use_container_width=True)
+        if not display_items:
+            st.info("No items match the current filters. Adjust the Filters panel above.")
+        else:
+            try:
+                with st.spinner("Rendering Gantt chart..."):
+                    gantt_preview = render_gantt(display_items, config, dpi=150)
+                st.image(gantt_preview, use_container_width=True)
 
-            st.markdown("---")
-            st.markdown('<div class="export-header">Export</div>', unsafe_allow_html=True)
-            g1, g2, g3 = st.columns(3)
+                st.markdown("---")
+                st.markdown('<div class="export-header">Export</div>', unsafe_allow_html=True)
+                g1, g2, g3 = st.columns(3)
 
-            with g1:
-                hires_gantt = render_gantt(items, config, dpi=300)
-                st.download_button(
-                    "Download PNG (300 DPI)", data=hires_gantt,
-                    file_name="gantt_chart.png", mime="image/png",
-                    use_container_width=True,
-                )
-            with g2:
-                gantt_pdf = render_gantt_pdf(items, config, dpi=300)
-                st.download_button(
-                    "Download PDF", data=gantt_pdf,
-                    file_name="gantt_chart.pdf", mime="application/pdf",
-                    use_container_width=True,
-                )
-            with g3:
-                gantt_pptx = export_gantt_pptx(items, config)
-                st.download_button(
-                    "Download PowerPoint", data=gantt_pptx,
-                    file_name="gantt_chart.pptx",
-                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                    use_container_width=True,
-                )
+                with g1:
+                    hires_gantt = render_gantt(display_items, config, dpi=300)
+                    st.download_button(
+                        "Download PNG (300 DPI)", data=hires_gantt,
+                        file_name="gantt_chart.png", mime="image/png",
+                        use_container_width=True,
+                    )
+                with g2:
+                    gantt_pdf = render_gantt_pdf(display_items, config, dpi=300)
+                    st.download_button(
+                        "Download PDF", data=gantt_pdf,
+                        file_name="gantt_chart.pdf", mime="application/pdf",
+                        use_container_width=True,
+                    )
+                with g3:
+                    gantt_pptx = export_gantt_pptx(display_items, config)
+                    st.download_button(
+                        "Download PowerPoint", data=gantt_pptx,
+                        file_name="gantt_chart.pptx",
+                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        use_container_width=True,
+                    )
 
-        except Exception as e:
-            st.error(f"Couldn't render the Gantt chart: {e}")
-            with st.expander("Show full error"):
-                st.code(traceback.format_exc())
+            except Exception as e:
+                st.error(f"Couldn't render the Gantt chart: {e}")
+                with st.expander("Show full error"):
+                    st.code(traceback.format_exc())
 
     # ── BLOCK DIAGRAM TAB ────────────────────────────────────────────────
     with tab_block:
@@ -1037,49 +1129,53 @@ def show_visualizations():
             help="16:9 for modern widescreen displays. 4:3 for older projectors.",
         )
 
-        try:
-            with st.spinner("Rendering block diagram..."):
-                block_preview = render_block_diagram(items, config, dpi=150, slide_aspect=aspect_ratio)
-            st.image(block_preview, use_container_width=True)
+        if not display_items:
+            st.info("No items match the current filters. Adjust the Filters panel above.")
+        else:
+            try:
+                with st.spinner("Rendering block diagram..."):
+                    block_preview = render_block_diagram(display_items, config, dpi=150, slide_aspect=aspect_ratio)
+                st.image(block_preview, use_container_width=True)
 
-            st.markdown("---")
-            st.markdown('<div class="export-header">Export</div>', unsafe_allow_html=True)
-            b1, b2, b3 = st.columns(3)
+                st.markdown("---")
+                st.markdown('<div class="export-header">Export</div>', unsafe_allow_html=True)
+                b1, b2, b3 = st.columns(3)
 
-            with b1:
-                hires_block = render_block_diagram(items, config, dpi=300, slide_aspect=aspect_ratio)
-                st.download_button(
-                    "Download PNG (300 DPI)", data=hires_block,
-                    file_name="block_diagram.png", mime="image/png",
-                    use_container_width=True,
-                )
-            with b2:
-                block_pdf_data = render_block_pdf(items, config, dpi=300, slide_aspect=aspect_ratio)
-                st.download_button(
-                    "Download PDF", data=block_pdf_data,
-                    file_name="block_diagram.pdf", mime="application/pdf",
-                    use_container_width=True,
-                )
-            with b3:
-                block_pptx = export_block_pptx(items, config)
-                st.download_button(
-                    "Download PowerPoint", data=block_pptx,
-                    file_name="block_diagram.pptx",
-                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                    use_container_width=True,
-                )
+                with b1:
+                    hires_block = render_block_diagram(display_items, config, dpi=300, slide_aspect=aspect_ratio)
+                    st.download_button(
+                        "Download PNG (300 DPI)", data=hires_block,
+                        file_name="block_diagram.png", mime="image/png",
+                        use_container_width=True,
+                    )
+                with b2:
+                    block_pdf_data = render_block_pdf(display_items, config, dpi=300, slide_aspect=aspect_ratio)
+                    st.download_button(
+                        "Download PDF", data=block_pdf_data,
+                        file_name="block_diagram.pdf", mime="application/pdf",
+                        use_container_width=True,
+                    )
+                with b3:
+                    block_pptx = export_block_pptx(display_items, config)
+                    st.download_button(
+                        "Download PowerPoint", data=block_pptx,
+                        file_name="block_diagram.pptx",
+                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        use_container_width=True,
+                    )
 
-        except Exception as e:
-            st.error(f"Couldn't render the block diagram: {e}")
-            with st.expander("Show full error"):
-                st.code(traceback.format_exc())
+            except Exception as e:
+                st.error(f"Couldn't render the block diagram: {e}")
+                with st.expander("Show full error"):
+                    st.code(traceback.format_exc())
 
     # ── DATA PREVIEW TAB ─────────────────────────────────────────────────
     with tab_data:
         st.markdown("#### Edit Data")
         st.caption(
             "Edit any cell, add rows with the + button below the table, or delete rows "
-            "by selecting them and pressing Delete. Changes update the charts instantly."
+            "by selecting them and pressing Delete. Changes update the charts instantly. "
+            "This table always shows every item, even when filters are active above."
         )
 
         editable_df = _items_to_df(items)

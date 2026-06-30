@@ -10,6 +10,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
 from models import WorkItem, ChartConfig
+from sample_data import get_sample_rows
 
 
 # ── Reading Excel ────────────────────────────────────────────────────────────
@@ -60,12 +61,22 @@ def read_excel(file) -> Tuple[List[WorkItem], ChartConfig, List[str]]:
     start_col = _find_col(df, ["start_date", "start", "begin", "from", "begin_date"])
     end_col = _find_col(df, ["end_date", "end", "finish", "to", "due", "due_date", "finish_date"])
 
+    found_cols = ", ".join(f"'{c}'" for c in df.columns) or "(no columns found — is row 1 the header?)"
     if not title_col:
-        raise ValueError("Missing required column: 'Title' (or 'Name', 'Task', 'Item')")
+        raise ValueError(
+            f"Missing required column: 'Title' (or 'Name', 'Task', 'Item'). "
+            f"Columns found in your file: {found_cols}"
+        )
     if not start_col:
-        raise ValueError("Missing required column: 'Start Date' (or 'Start', 'Begin')")
+        raise ValueError(
+            f"Missing required column: 'Start Date' (or 'Start', 'Begin'). "
+            f"Columns found in your file: {found_cols}"
+        )
     if not end_col:
-        raise ValueError("Missing required column: 'End Date' (or 'End', 'Finish', 'Due')")
+        raise ValueError(
+            f"Missing required column: 'End Date' (or 'End', 'Finish', 'Due'). "
+            f"Columns found in your file: {found_cols}"
+        )
 
     # Optional columns
     cat_col = _find_col(df, ["category", "workstream", "team", "group", "stream", "department"])
@@ -93,13 +104,19 @@ def read_excel(file) -> Tuple[List[WorkItem], ChartConfig, List[str]]:
 
         category = _safe_str(row.get(cat_col)) if cat_col else "General"
         description = _safe_str(row.get(desc_col)) if desc_col else ""
-        status = _safe_str(row.get(status_col)).lower().replace(" ", "_") if status_col else "planned"
+        raw_status = _safe_str(row.get(status_col)) if status_col else ""
+        status = raw_status.lower().replace(" ", "_") if raw_status else "planned"
         owner = _safe_str(row.get(owner_col)) if owner_col else ""
         label = _safe_str(row.get(label_col)) if label_col else ""
 
         if not category:
             category = "General"
         if status not in ("planned", "in_progress", "done", "at_risk"):
+            if raw_status:
+                warnings.append(
+                    f"Row {idx + 2}: Unrecognized status '{raw_status}' for '{title}' "
+                    f"— defaulted to 'planned'"
+                )
             status = "planned"
 
         items.append(WorkItem(
@@ -138,8 +155,12 @@ def _safe_str(val) -> str:
 
 # ── Writing Template ─────────────────────────────────────────────────────────
 
-def create_template_bytes() -> bytes:
-    """Create a beautiful, user-friendly Excel template."""
+def create_template_bytes(dataset_name: str = "Product Launch") -> bytes:
+    """Create a beautiful, user-friendly Excel template pre-filled with sample data.
+
+    dataset_name selects which built-in sample dataset to populate the sheet
+    with — see sample_data.SAMPLE_DATASETS for available options.
+    """
     wb = Workbook()
     ws = wb.active
     ws.title = "Roadmap"
@@ -186,40 +207,9 @@ def create_template_bytes() -> bytes:
     ws.add_data_validation(status_dv)
     status_dv.add(f"F2:F200")
 
-    # Sample data — a 1-year transformation roadmap with 25 deliveries.
-    # Deliveries are prioritized (Delivery 1 = highest priority, starts first).
-    # Multiple workstreams run concurrently to create a dense Tetris-style visualization.
-    sample_data = [
-        # Wave 1: Foundation (Jan–Mar) — 8 concurrent deliveries
-        ("Strategic Vision & Roadmap",   "2025-01-06", "2025-03-14", "Strategy",    "Define transformation goals; Stakeholder alignment; Success metrics; Executive sign-off", "done", "Sarah", "Delivery 1"),
-        ("Customer Research & Insights", "2025-01-06", "2025-03-28", "Product",     "Recruit participants; Conduct 30 interviews; Synthesize findings; Present to leadership", "done", "Lisa", "Delivery 2"),
-        ("Brand Identity Refresh",       "2025-01-06", "2025-04-11", "Marketing",   "New visual identity; Logo redesign; Brand guidelines; Template library; Asset rollout", "done", "Tom", "Delivery 3"),
-        ("Technology Assessment",        "2025-01-06", "2025-03-28", "Engineering", "Platform audit; Architecture review; Tool evaluation; Migration plan; Vendor demos", "done", "Mike", "Delivery 4"),
-        ("Vendor Selection & Contracts", "2025-01-06", "2025-02-28", "Operations",  "RFP process; Vendor demos; Contract negotiation; Legal review; Final selection", "done", "Karen", "Delivery 5"),
-        ("CRM & Pipeline Setup",         "2025-01-06", "2025-03-14", "Sales",       "Salesforce configuration; Pipeline stages; Reporting dashboards; Data migration", "done", "Nina", "Delivery 6"),
-        ("Pricing Strategy",             "2025-01-06", "2025-02-14", "Sales",       "Competitive analysis; Pricing tiers; Discount framework; Approval workflows", "done", "Jake", "Delivery 7"),
-        ("Hiring Plan Execution",        "2025-01-06", "2025-04-25", "Operations",  "Job postings; Candidate screening; Interview rounds; Offer management; Onboarding 12 roles", "done", "Karen", "Delivery 8"),
-        # Wave 2: Build (Mar–Jun) — 7 concurrent deliveries
-        ("Product Requirements & Specs", "2025-03-03", "2025-05-09", "Product",     "Define MVP features; Write specifications; Stakeholder review; Final sign-off", "in_progress", "Lisa", "Delivery 9"),
-        ("Website Redesign",             "2025-03-03", "2025-06-06", "Marketing",   "Information architecture; UX wireframes; Visual design; Content migration; QA testing", "in_progress", "Sarah", "Delivery 10"),
-        ("Core Platform Build",          "2025-03-03", "2025-07-11", "Engineering", "Backend services; Database design; API gateway; Authentication; CI/CD pipeline", "in_progress", "Mike", "Delivery 11"),
-        ("Sales Playbook Creation",      "2025-03-17", "2025-05-23", "Sales",       "Pitch decks; Battle cards; Objection handling; ROI calculator; Competitive positioning", "in_progress", "Jake", "Delivery 12"),
-        ("UX/UI Design & Prototypes",    "2025-04-07", "2025-06-20", "Product",     "User flows; Wireframes; High-fidelity mockups; Clickable prototype; Usability testing", "in_progress", "Amy", "Delivery 13"),
-        ("Payment Integration",          "2025-04-14", "2025-06-27", "Engineering", "Stripe integration; PayPal setup; Webhook handling; Reconciliation; PCI compliance", "in_progress", "Dave", "Delivery 14"),
-        ("Office Expansion Setup",       "2025-04-28", "2025-06-20", "Operations",  "Floor plan design; Construction; IT infrastructure; Furniture procurement; Move logistics", "planned", "Karen", "Delivery 15"),
-        # Wave 3: Scale (Jun–Sep) — 5 concurrent deliveries
-        ("Product Launch Campaign",      "2025-06-02", "2025-08-15", "Marketing",   "Campaign strategy; Social media content; Email sequences; Press releases; Launch event", "planned", "Tom", "Delivery 16"),
-        ("Mobile App Development",       "2025-06-16", "2025-09-19", "Engineering", "iOS development; Android development; Push notifications; Offline mode; App Store submission", "planned", "Mike", "Delivery 17"),
-        ("Sales Team Training",          "2025-06-16", "2025-08-08", "Sales",       "Product training; Demo certification; Role-play exercises; Assessment; Field readiness", "planned", "Jake", "Delivery 18"),
-        ("Beta Testing Program",         "2025-06-30", "2025-09-05", "Product",     "Recruit 50 beta testers; Onboarding; Feedback collection; Bug triage; Iteration cycles", "planned", "Lisa", "Delivery 19"),
-        ("Partner Onboarding Program",   "2025-07-14", "2025-09-19", "Operations",  "Partner agreements; Technical integration; Training sessions; Go-live support; SLA setup", "planned", "Rob", "Delivery 20"),
-        # Wave 4: Launch & Optimize (Sep–Dec) — 5 concurrent deliveries
-        ("Pilot Customer Program",       "2025-09-01", "2025-11-14", "Sales",       "Identify 10 prospects; Negotiate terms; Onboard pilots; Track success metrics; Case studies", "planned", "Nina", "Delivery 21"),
-        ("Performance & Load Testing",   "2025-09-01", "2025-10-31", "Engineering", "Load test scripts; Stress testing; Performance optimization; Capacity planning; SLA validation", "planned", "Dave", "Delivery 22"),
-        ("Product Documentation",        "2025-09-15", "2025-11-28", "Product",     "User guides; API documentation; Help center articles; Video tutorials; Knowledge base", "planned", "Amy", "Delivery 23"),
-        ("Customer Testimonials",        "2025-10-01", "2025-12-05", "Marketing",   "Identify advocates; Schedule interviews; Video production; Post-production; Distribution", "planned", "Sarah", "Delivery 24"),
-        ("Security Audit & Compliance",  "2025-10-13", "2025-12-19", "Engineering", "Third-party assessment; Vulnerability remediation; Penetration testing; SOC 2 prep; Certification", "planned", "Mike", "Delivery 25"),
-    ]
+    # Sample data sourced from the shared dataset registry (sample_data.py) so
+    # the downloadable template and the in-app "Load Sample Data" flow stay in sync.
+    sample_data = get_sample_rows(dataset_name)
 
     data_font = Font(name="Calibri", size=11)
     data_align = Alignment(vertical="center", wrap_text=False)
